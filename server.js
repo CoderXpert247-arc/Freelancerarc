@@ -1,7 +1,7 @@
 require('dotenv').config();
 const express = require('express');
 const fs = require('fs');
-const { twiml: { VoiceResponse } } = require('twilio');
+const plivo = require('plivo');
 
 const app = express();
 app.use(express.urlencoded({ extended: false }));
@@ -22,65 +22,75 @@ function findUser(pin) {
   return getUsers().find(u => u.pin === pin);
 }
 
-// 🔹 NEW: PIN Generator
+// 🔹 PIN Generator
 function generatePin() {
   return Math.floor(1000 + Math.random() * 9000).toString();
 }
 
 // ===== 1. Incoming Call → Ask PIN =====
 app.post('/voice', (req, res) => {
-  const twiml = new VoiceResponse();
+  const response = new plivo.Response();
 
-  twiml.gather({ numDigits: 4, action: '/check-pin' })
-       .say('Welcome. Enter your four digit access pin.');
+  const getDigits = response.addGetDigits({
+    action: '/check-pin',
+    method: 'POST',
+    numDigits: 4,
+    timeout: 10
+  });
+  getDigits.addSpeak('Welcome. Enter your four digit access pin.');
 
-  res.type('text/xml');
-  res.send(twiml.toString());
+  // fallback if no digits entered
+  response.addSpeak('No input received. Goodbye.');
+
+  res.set('Content-Type', 'text/xml');
+  res.send(response.toXML());
 });
 
 // ===== 2. Check PIN =====
 app.post('/check-pin', (req, res) => {
-  const twiml = new VoiceResponse();
-  const pin = req.body.Digits;
-  const user = findUser(pin);
+  const digits = req.body.Digits;
+  const user = findUser(digits);
+
+  const response = new plivo.Response();
 
   if (!user) {
-    twiml.say('Invalid pin.');
-    twiml.hangup();
+    response.addSpeak('Invalid PIN. Goodbye.');
   } else if (user.balance <= 0) {
-    twiml.say('Your balance is empty.');
-    twiml.hangup();
+    response.addSpeak('Your balance is empty. Goodbye.');
   } else {
-    twiml.gather({
+    const getDigits = response.addGetDigits({
+      action: `/dial-number?pin=${digits}`,
+      method: 'POST',
       numDigits: 15,
-      action: `/dial-number?pin=${pin}`
-    }).say('Pin accepted. Enter the number you want to call.');
+      timeout: 20
+    });
+    getDigits.addSpeak('PIN accepted. Enter the number you want to call.');
   }
 
-  res.type('text/xml');
-  res.send(twiml.toString());
+  res.set('Content-Type', 'text/xml');
+  res.send(response.toXML());
 });
 
 // ===== 3. Dial Call =====
 app.post('/dial-number', (req, res) => {
-  const twiml = new VoiceResponse();
   const number = req.body.Digits;
   const pin = req.query.pin;
 
-  const dial = twiml.dial({
+  const response = new plivo.Response();
+
+  const dial = response.addDial({
     action: `/call-ended?pin=${pin}`,
     method: 'POST'
   });
+  dial.addNumber(number);
 
-  dial.number(number);
-
-  res.type('text/xml');
-  res.send(twiml.toString());
+  res.set('Content-Type', 'text/xml');
+  res.send(response.toXML());
 });
 
 // ===== 4. Call Ended → Deduct Balance =====
 app.post('/call-ended', (req, res) => {
-  const duration = parseInt(req.body.DialCallDuration || 0); // seconds
+  const duration = parseInt(req.body.DialDuration || 0); // seconds
   const pin = req.query.pin;
 
   const users = getUsers();
@@ -98,39 +108,38 @@ app.post('/call-ended', (req, res) => {
   res.sendStatus(200);
 });
 
-// ===== 5. MANUAL TOP-UP (Existing User) =====
+// ===== 5. MANUAL TOP-UP =====
 app.post('/admin/topup', (req, res) => {
   const { pin, amount, key } = req.body;
 
   if (key !== process.env.ADMIN_KEY) {
-    return res.status(403).json({ error: "Unauthorized" });
+    return res.status(403).json({ error: 'Unauthorized' });
   }
 
   const users = getUsers();
   const user = users.find(u => u.pin === pin);
 
-  if (!user) return res.status(404).json({ error: "User not found" });
+  if (!user) return res.status(404).json({ error: 'User not found' });
 
   user.balance += parseFloat(amount);
   saveUsers(users);
 
-  res.json({ message: "Balance updated", newBalance: user.balance });
+  res.json({ message: 'Balance updated', newBalance: user.balance });
 });
 
-// ===== 6. CREATE NEW USER (AUTO PIN) =====
+// ===== 6. CREATE NEW USER =====
 app.post('/admin/create-user', (req, res) => {
   const { amount, key } = req.body;
 
   if (key !== process.env.ADMIN_KEY) {
-    return res.status(403).json({ error: "Unauthorized" });
+    return res.status(403).json({ error: 'Unauthorized' });
   }
 
   const users = getUsers();
-
   let newPin;
   do {
     newPin = generatePin();
-  } while (users.find(u => u.pin === newPin)); // ensure unique PIN
+  } while (users.find(u => u.pin === newPin));
 
   const newUser = {
     pin: newPin,
@@ -140,11 +149,7 @@ app.post('/admin/create-user', (req, res) => {
   users.push(newUser);
   saveUsers(users);
 
-  res.json({
-    message: "User created",
-    pin: newPin,
-    balance: newUser.balance
-  });
+  res.json({ message: 'User created', pin: newPin, balance: newUser.balance });
 });
 
 // ===== Start Server =====
