@@ -1,0 +1,14 @@
+{
+  "name": "call-gateway",
+  "version": "1.0.0",
+  "description": "Prepaid call-through telecom system",
+  "main": "server.js",
+  "scripts": {
+    "start": "node server.js"
+  },
+  "dependencies": {
+    "dotenv": "^16.4.0",
+    "express": "^4.18.2",
+    "twilio": "^4.21.0"
+  }
+}
