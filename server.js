@@ -22,6 +22,11 @@ function findUser(pin) {
   return getUsers().find(u => u.pin === pin);
 }
 
+// 🔹 NEW: PIN Generator
+function generatePin() {
+  return Math.floor(1000 + Math.random() * 9000).toString();
+}
+
 // ===== 1. Incoming Call → Ask PIN =====
 app.post('/voice', (req, res) => {
   const twiml = new VoiceResponse();
@@ -93,8 +98,7 @@ app.post('/call-ended', (req, res) => {
   res.sendStatus(200);
 });
 
-
-// ===== 5. MANUAL TOP-UP ENDPOINT (HOW YOU GET PAID) =====
+// ===== 5. MANUAL TOP-UP (Existing User) =====
 app.post('/admin/topup', (req, res) => {
   const { pin, amount, key } = req.body;
 
@@ -113,6 +117,35 @@ app.post('/admin/topup', (req, res) => {
   res.json({ message: "Balance updated", newBalance: user.balance });
 });
 
+// ===== 6. CREATE NEW USER (AUTO PIN) =====
+app.post('/admin/create-user', (req, res) => {
+  const { amount, key } = req.body;
+
+  if (key !== process.env.ADMIN_KEY) {
+    return res.status(403).json({ error: "Unauthorized" });
+  }
+
+  const users = getUsers();
+
+  let newPin;
+  do {
+    newPin = generatePin();
+  } while (users.find(u => u.pin === newPin)); // ensure unique PIN
+
+  const newUser = {
+    pin: newPin,
+    balance: parseFloat(amount)
+  };
+
+  users.push(newUser);
+  saveUsers(users);
+
+  res.json({
+    message: "User created",
+    pin: newPin,
+    balance: newUser.balance
+  });
+});
 
 // ===== Start Server =====
 app.listen(process.env.PORT, () => {
