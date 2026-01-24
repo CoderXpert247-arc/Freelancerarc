@@ -147,6 +147,13 @@ app.post('/admin/create-user', (req, res) => {
   const { amount, plan, key, referralPin } = req.body;
   if (key !== process.env.ADMIN_KEY) return res.status(403).json({ error: "Unauthorized" });
 
+  // Minimum 100 minutes worth in wallet for referral to work
+  const minTopUp = 100 * RATE; // 100 minutes cost in money
+
+  if (referralPin && (!amount || amount < minTopUp)) {
+    return res.status(400).json({ error: "You must top up at least 100 minutes worth for referral bonuses" });
+  }
+
   const users = getUsers();
   let pin;
   do { pin = generatePin(); } while (users.find(u => u.pin === pin));
@@ -165,18 +172,19 @@ app.post('/admin/create-user', (req, res) => {
     newUser.planExpires = Date.now() + selectedPlan.days * 86400000;
   }
 
-  users.push(newUser);
-
-  // Referral bonus
+  // Apply referral bonuses
   if (referralPin) {
     const refUser = users.find(u => u.pin === referralPin);
     if (refUser) {
-      refUser.planMinutes += 30;
+      refUser.planMinutes += 5;    // Referrer bonus
+      newUser.planMinutes += 10;   // New user bonus
       refUser.referrals += 1;
     }
   }
 
+  users.push(newUser);
   saveUsers(users);
+
   res.json({ message: "User created", pin, balance: newUser.balance, plan: newUser.planName, planMinutes: newUser.planMinutes });
 });
 
@@ -226,6 +234,6 @@ app.post('/admin/user-info', (req, res) => {
 });
 
 // =================== HEALTH ===================
-app.get('/', (req, res) => res.send('Telecom Server Running 🚀'));
+app.get('/', (req, res) => res.send('Teld Server Running 🚀'));
 
 app.listen(process.env.PORT || 3000, () => console.log("Server live"));
