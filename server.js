@@ -147,6 +147,11 @@ app.post('/admin/create-user', (req, res) => {
   });
 });
 
+// ===== NEW: GET / for health check =====
+app.get('/', (req, res) => {
+  res.send('Call Gateway Server is running ✅');
+});
+
 // ===== Start Server =====
 app.listen(process.env.PORT, () => {
   console.log(`Server running on port ${process.env.PORT}`);
