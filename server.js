@@ -1,13 +1,21 @@
 require('dotenv').config();
 const express = require('express');
 const fs = require('fs');
-const { twiml: { VoiceResponse } } = require('twilio');
+const twilio = require('twilio');
+const { twiml: { VoiceResponse } } = twilio;
 
 const app = express();
 
 // ===== Middleware =====
 app.use(express.urlencoded({ extended: true })); // form data
 app.use(express.json()); // json body
+
+// ===== Twilio Client =====
+const client = twilio(
+  process.env.TWILIO_ACCOUNT_SID,
+  process.env.TWILIO_AUTH_TOKEN
+);
+const TWILIO_NUMBER = process.env.TWILIO_PHONE_NUMBER;
 
 const RATE = parseFloat(process.env.RATE_PER_MINUTE);
 
@@ -47,8 +55,6 @@ app.post('/voice', (req, res) => {
 // ===== 2. Check PIN =====
 app.post('/check-pin', (req, res) => {
   const twiml = new VoiceResponse();
-  
-  // Accept Digits from body or query
   const pin = req.body.Digits || req.query.Digits;
   const user = findUser(pin);
 
@@ -71,16 +77,23 @@ app.post('/check-pin', (req, res) => {
 });
 
 // ===== 3. Dial Call =====
-app.post('/dial-number', (req, res) => {
+app.post('/dial-number', async (req, res) => {
   const twiml = new VoiceResponse();
   const number = req.body.Digits || req.query.Digits;
   const pin = req.query.pin;
 
+  if (!number) {
+    twiml.say('No number entered. Goodbye.');
+    twiml.hangup();
+    return res.type('text/xml').send(twiml.toString());
+  }
+
+  // Dial the number via Twilio
   const dial = twiml.dial({
     action: `/call-ended?pin=${pin}`,
-    method: 'POST'
+    method: 'POST',
+    callerId: TWILIO_NUMBER
   });
-
   dial.number(number);
 
   res.type('text/xml');
@@ -139,7 +152,7 @@ app.post('/admin/create-user', (req, res) => {
   let newPin;
   do {
     newPin = generatePin();
-  } while (users.find(u => u.pin === newPin)); // ensure unique
+  } while (users.find(u => u.pin === newPin));
 
   const newUser = {
     pin: newPin,
