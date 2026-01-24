@@ -4,14 +4,20 @@ const fs = require('fs');
 const { twiml: { VoiceResponse } } = require('twilio');
 
 const app = express();
-app.use(express.urlencoded({ extended: false }));
-app.use(express.json());
+
+// ===== Middleware =====
+app.use(express.urlencoded({ extended: true })); // form data
+app.use(express.json()); // json body
 
 const RATE = parseFloat(process.env.RATE_PER_MINUTE);
 
 // ===== Helpers =====
 function getUsers() {
-  return JSON.parse(fs.readFileSync('users.json'));
+  try {
+    return JSON.parse(fs.readFileSync('users.json'));
+  } catch (err) {
+    return [];
+  }
 }
 
 function saveUsers(users) {
@@ -22,7 +28,7 @@ function findUser(pin) {
   return getUsers().find(u => u.pin === pin);
 }
 
-// 🔹 NEW: PIN Generator
+// 🔹 PIN Generator
 function generatePin() {
   return Math.floor(1000 + Math.random() * 9000).toString();
 }
@@ -31,7 +37,7 @@ function generatePin() {
 app.post('/voice', (req, res) => {
   const twiml = new VoiceResponse();
 
-  twiml.gather({ numDigits: 4, action: '/check-pin' })
+  twiml.gather({ numDigits: 4, action: '/check-pin', method: 'POST' })
        .say('Welcome. Enter your four digit access pin.');
 
   res.type('text/xml');
@@ -41,7 +47,9 @@ app.post('/voice', (req, res) => {
 // ===== 2. Check PIN =====
 app.post('/check-pin', (req, res) => {
   const twiml = new VoiceResponse();
-  const pin = req.body.Digits;
+  
+  // Accept Digits from body or query
+  const pin = req.body.Digits || req.query.Digits;
   const user = findUser(pin);
 
   if (!user) {
@@ -53,7 +61,8 @@ app.post('/check-pin', (req, res) => {
   } else {
     twiml.gather({
       numDigits: 15,
-      action: `/dial-number?pin=${pin}`
+      action: `/dial-number?pin=${pin}`,
+      method: 'POST'
     }).say('Pin accepted. Enter the number you want to call.');
   }
 
@@ -64,7 +73,7 @@ app.post('/check-pin', (req, res) => {
 // ===== 3. Dial Call =====
 app.post('/dial-number', (req, res) => {
   const twiml = new VoiceResponse();
-  const number = req.body.Digits;
+  const number = req.body.Digits || req.query.Digits;
   const pin = req.query.pin;
 
   const dial = twiml.dial({
@@ -98,7 +107,7 @@ app.post('/call-ended', (req, res) => {
   res.sendStatus(200);
 });
 
-// ===== 5. MANUAL TOP-UP (Existing User) =====
+// ===== 5. Manual Top-Up (Existing User) =====
 app.post('/admin/topup', (req, res) => {
   const { pin, amount, key } = req.body;
 
@@ -117,7 +126,7 @@ app.post('/admin/topup', (req, res) => {
   res.json({ message: "Balance updated", newBalance: user.balance });
 });
 
-// ===== 6. CREATE NEW USER (AUTO PIN) =====
+// ===== 6. Create New User (Auto PIN) =====
 app.post('/admin/create-user', (req, res) => {
   const { amount, key } = req.body;
 
@@ -130,7 +139,7 @@ app.post('/admin/create-user', (req, res) => {
   let newPin;
   do {
     newPin = generatePin();
-  } while (users.find(u => u.pin === newPin)); // ensure unique PIN
+  } while (users.find(u => u.pin === newPin)); // ensure unique
 
   const newUser = {
     pin: newPin,
@@ -147,12 +156,13 @@ app.post('/admin/create-user', (req, res) => {
   });
 });
 
-// ===== NEW: GET / for health check =====
+// ===== 7. Health Check =====
 app.get('/', (req, res) => {
   res.send('Call Gateway Server is running ✅');
 });
 
 // ===== Start Server =====
-app.listen(process.env.PORT, () => {
-  console.log(`Server running on port ${process.env.PORT}`);
+const port = process.env.PORT || 3000;
+app.listen(port, () => {
+  console.log(`Server running on port ${port}`);
 });
