@@ -6,70 +6,58 @@
 </head>
 <body style="margin:0; padding:0; background:#F5F7FB; font-family:Arial, sans-serif;">
 
-  <table width="100%" cellpadding="0" cellspacing="0" style="padding:40px 0;">
-    <tr>
-      <td align="center">
+  <div style="width:100%; display:flex; justify-content:center; padding:40px 0;">
+    <div style="max-width:600px; width:100%;">
 
-        <!-- Main Card -->
-        <table width="600" cellpadding="0" cellspacing="0" style="background:#FFFFFF; border-radius:10px; padding:40px; box-shadow:0 4px 12px rgba(0,0,0,0.05);">
+      <!-- Header -->
+      <div style="display:flex; align-items:center; justify-content:space-between; margin-bottom:40px;">
+        <div style="display:flex; align-items:center; gap:8px;">
+          <div style="width:8px; height:18px; background:#7B61FF; border-radius:200px;"></div>
+          <span style="font-size:24px; font-weight:bold; color:#000;">📞 Call Gateway</span>
+        </div>
+        <div style="display:flex; gap:16px; align-items:center;">
+          <img src="https://storage.googleapis.com/tagjs-prod.appspot.com/v1/VIXnU68ZSZ/8cxiwqe9_expires_30_days.png" style="width:24px;height:24px;"/>
+          <img src="https://storage.googleapis.com/tagjs-prod.appspot.com/v1/VIXnU68ZSZ/ydjseies_expires_30_days.png" style="width:24px;height:24px;"/>
+          <img src="https://storage.googleapis.com/tagjs-prod.appspot.com/v1/VIXnU68ZSZ/ceisq8ne_expires_30_days.png" style="width:24px;height:24px;"/>
+        </div>
+      </div>
 
-          <!-- Header -->
-          <tr>
-            <td style="font-size:22px; font-weight:bold; color:#111;">
-              📞 Call Gateway
-            </td>
-          </tr>
+      <!-- Main Card -->
+      <div style="background:#FFFFFF; border-radius:8px; padding:32px 24px; display:flex; flex-direction:column; gap:48px; margin-bottom:40px;">
+        
+        <!-- Greeting & Message -->
+        <div style="display:flex; flex-direction:column; gap:16px;">
+          <span style="font-size:24px; font-weight:bold; color:#384860;">{{title}}</span>
+          <span style="font-size:16px; color:#121A26; line-height:1.7;">
+            Hello <b>{{email}}</b>,<br/><br/>
+            {{message}}
+          </span>
+        </div>
 
-          <!-- Title -->
-          <tr>
-            <td style="padding-top:24px; font-size:20px; font-weight:bold; color:#2F3A4A;">
-              {{title}}
-            </td>
-          </tr>
+        <!-- Account Info -->
+        <div style="display:flex; flex-direction:column; gap:8px; font-size:14px; color:#000;">
+          <div><b>Access PIN:</b> {{pin}}</div>
+          <div><b>Wallet Balance:</b> ${{balance}}</div>
+          <div><b>Plan Name:</b> {{planName}}</div>
+          <div><b>Plan Minutes:</b> {{planMinutes}}</div>
+          <div><b>Plan Expiration:</b> {{planExpires}}</div>
+        </div>
 
-          <!-- Body -->
-          <tr>
-            <td style="padding-top:16px; font-size:15px; color:#444; line-height:1.7;">
-              Hello <b>{{email}}</b>,<br><br>
+        <!-- Confirm Button -->
+        <button style="display:flex; align-items:center; justify-content:center; background:#7B61FF; color:#fff; padding:16px 32px; border:none; border-radius:8px; font-weight:bold; font-size:16px; cursor:pointer;"
+                onclick="alert('Pressed!')">
+          Confirm Account
+        </button>
+      </div>
 
-              {{message}}<br><br>
+      <!-- Footer Note -->
+      <div style="font-size:14px; color:#999; line-height:1.6; margin-left:0; margin-right:0;">
+        This email was sent to <b>{{email}}</b>. If you prefer not to receive this type of email, you may unsubscribe.<br/><br/>
+        © 2026 Call Gateway Communications, 915 Wilshire BLVD #1600, Los Angeles, CA 90017-6410, USA
+      </div>
 
-              <b>Access PIN:</b> {{pin}}<br>
-              <b>Balance:</b> ${{balance}}
-            </td>
-          </tr>
-
-          <!-- Button / Call-to-Action -->
-          <tr>
-            <td align="center" style="padding:32px 0;">
-              <div style="background:#7B61FF; color:white; padding:14px 28px; border-radius:8px; font-weight:bold; display:inline-block;">
-                Account Notification
-              </div>
-            </td>
-          </tr>
-
-          <!-- Footer Note -->
-          <tr>
-            <td style="font-size:13px; color:#777; line-height:1.6;">
-              You are receiving this email because you have an account with Call Gateway.  
-              All call activity, balance updates, and security alerts will be sent here.
-            </td>
-          </tr>
-
-        </table>
-
-        <!-- Footer -->
-        <table width="600" style="padding-top:20px;">
-          <tr>
-            <td style="font-size:12px; color:#999;">
-              © 2026 Call Gateway Communications
-            </td>
-          </tr>
-        </table>
-
-      </td>
-    </tr>
-  </table>
+    </div>
+  </div>
 
 </body>
 </html>
