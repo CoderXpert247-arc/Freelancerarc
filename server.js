@@ -2,7 +2,7 @@ require('dotenv').config();
 const express = require('express');
 const fs = require('fs');
 const twilio = require('twilio');
-const sendEmail = require('./mailer');
+const sendEmail = require('./mailer'); // your mailer.js
 
 const { twiml: { VoiceResponse } } = twilio;
 const app = express();
@@ -10,7 +10,7 @@ const app = express();
 app.use(express.urlencoded({ extended: true }));
 app.use(express.json());
 
-// 🔥 Prevent server crash on bad JSON
+// 🔥 Prevent crash on bad JSON
 app.use((err, req, res, next) => {
   if (err instanceof SyntaxError && err.status === 400 && 'body' in err) {
     console.error("Bad JSON:", err.message);
@@ -130,23 +130,30 @@ app.post('/call-ended', async (req, res) => {
 
     saveUsers(users);
 
+    // Send email asynchronously
     if (user.email) {
-      await sendEmail(user.email, "Call Summary", {
-        email: user.email,
-        message: `You used ${minutesUsed.toFixed(2)} minutes.`,
-        balance: user.balance.toFixed(2),
-        minutes: user.planMinutes.toFixed(2),
-        plan: user.planName || "None"
-      });
+      try {
+        await sendEmail(user.email, "Call Summary", {
+          email: user.email,
+          message: `You used ${minutesUsed.toFixed(2)} minutes.`,
+          balance: user.balance.toFixed(2),
+          minutes: user.planMinutes.toFixed(2),
+          plan: user.planName || "None"
+        });
+      } catch (err) {
+        console.error("Failed to send call summary email:", err.message);
+      }
     }
+
+    console.log(`Call ended | PIN: ${pin} | Minutes: ${minutesUsed.toFixed(2)} | Wallet: $${user.balance.toFixed(2)}`);
   }
 
   res.sendStatus(200);
 });
 
-// =================== ADMIN ===================
+// =================== ADMIN ROUTES ===================
 
-// Create User
+// Create new user
 app.post('/admin/create-user', async (req, res) => {
   const { amount, plan, key, email } = req.body;
   if (key !== process.env.ADMIN_KEY) return res.status(403).json({ error: "Unauthorized" });
@@ -169,18 +176,29 @@ app.post('/admin/create-user', async (req, res) => {
   users.push(newUser);
   saveUsers(users);
 
+  // Send account creation email
   if (email) {
-    await sendEmail(email, "Account Created", {
-      email,
-      pin,
-      balance: newUser.balance,
-      minutes: newUser.planMinutes,
-      plan: newUser.planName || "Wallet Only",
-      message: "Your calling account is ready."
-    });
+    try {
+      await sendEmail(email, "Account Created", {
+        email,
+        pin,
+        balance: newUser.balance,
+        minutes: newUser.planMinutes,
+        plan: newUser.planName || "Wallet Only",
+        message: "Your calling account is ready."
+      });
+    } catch (err) {
+      console.error("Failed to send account creation email:", err.message);
+    }
   }
 
-  res.json({ pin, balance: newUser.balance });
+  res.json({
+    message: "User created",
+    pin,
+    balance: newUser.balance,
+    plan: newUser.planName,
+    planMinutes: newUser.planMinutes
+  });
 });
 
 // Top-up
@@ -196,16 +214,21 @@ app.post('/admin/topup', async (req, res) => {
   saveUsers(users);
 
   if (user.email) {
-    await sendEmail(user.email, "Wallet Top-up", {
-      email: user.email,
-      message: `Wallet credited with $${amount}`,
-      balance: user.balance
-    });
+    try {
+      await sendEmail(user.email, "Wallet Top-up", {
+        email: user.email,
+        message: `Wallet credited with $${amount}`,
+        balance: user.balance
+      });
+    } catch (err) {
+      console.error("Failed to send top-up email:", err.message);
+    }
   }
 
   res.json({ balance: user.balance });
 });
 
-// =================== HEALTH ===================
+// =================== HEALTH CHECK ===================
 app.get('/', (req, res) => res.send('Teld Server Running 🚀'));
+
 app.listen(process.env.PORT || 3000, () => console.log("Server live"));
