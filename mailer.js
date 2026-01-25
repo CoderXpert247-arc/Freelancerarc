@@ -12,22 +12,34 @@ const transporter = nodemailer.createTransport({
 });
 
 // ===== Load and process HTML template =====
-function loadTemplate(data) {
-  const templatePath = path.join(__dirname, 'templates', 'emailTemplates.html');
-  let html = fs.readFileSync(templatePath, 'utf8');
+function loadTemplate(data = {}) {
+  try {
+    // Ensure correct path to template
+    const templatePath = path.join(__dirname, 'templates', 'emailTemplates.html');
+    if (!fs.existsSync(templatePath)) {
+      throw new Error(`Email template not found at ${templatePath}`);
+    }
 
-  // Replace placeholders with actual data
-  Object.keys(data).forEach(key => {
-    const value = data[key] !== undefined ? data[key] : '';
-    html = html.replace(new RegExp(`{{${key}}}`, 'g'), value);
-  });
+    let html = fs.readFileSync(templatePath, 'utf8');
 
-  return html;
+    // Replace placeholders with actual data or empty string if undefined
+    Object.keys(data).forEach(key => {
+      const value = data[key] !== undefined ? data[key] : '';
+      html = html.replace(new RegExp(`{{${key}}}`, 'g'), value);
+    });
+
+    return html;
+  } catch (err) {
+    console.error("Error loading email template:", err.message);
+    throw err;
+  }
 }
 
 // ===== Send email =====
 async function sendEmail(to, subject, templateData = {}) {
   try {
+    if (!to) throw new Error("Recipient email address is required");
+
     const html = loadTemplate(templateData);
 
     const info = await transporter.sendMail({
