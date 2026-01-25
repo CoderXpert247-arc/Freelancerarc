@@ -1,3 +1,4 @@
+// mailer.js
 const fs = require('fs');
 const path = require('path');
 const sgMail = require('@sendgrid/mail');
@@ -5,8 +6,9 @@ const sgMail = require('@sendgrid/mail');
 // ===== SendGrid setup =====
 if (!process.env.SENDGRID_API_KEY) {
   console.error("❌ SENDGRID_API_KEY is missing in .env");
+} else {
+  sgMail.setApiKey(process.env.SENDGRID_API_KEY);
 }
-sgMail.setApiKey(process.env.SENDGRID_API_KEY);
 
 // ===== Load and process HTML template =====
 function loadTemplate(data = {}) {
@@ -32,7 +34,7 @@ function loadTemplate(data = {}) {
   }
 }
 
-// ===== Send email =====
+// ===== Send email function =====
 async function sendEmail(to, subject, templateData = {}) {
   try {
     if (!to) throw new Error("Recipient email address is required");
@@ -64,4 +66,31 @@ async function sendEmail(to, subject, templateData = {}) {
   }
 }
 
+// ===== Test snippet =====
+async function sendTestEmail() {
+  try {
+    if (!process.env.EMAIL_FROM) throw new Error("EMAIL_FROM is not set in .env");
+
+    const msg = {
+      to: 'uchendugoodluck067@gmail.com',        // recipient (replace with your Gmail for testing)
+      from: process.env.EMAIL_FROM,        // verified sender in SendGrid
+      subject: 'Test Email from Call Gateway',
+      text: 'Hello! This is a test email from Call Gateway.',
+    };
+
+    console.log("📧 Sending test email payload:", JSON.stringify(msg, null, 2));
+    await sgMail.send(msg);
+    console.log('✅ Test email sent successfully!');
+  } catch (err) {
+    console.error('❌ Error sending test email:', err.message);
+    if (err.response && err.response.body && err.response.body.errors) {
+      console.error("❌ SendGrid API errors:", err.response.body.errors);
+    }
+  }
+}
+
+// Uncomment to run test directly
+// sendTestEmail();
+
 module.exports = sendEmail;
+module.exports.sendTestEmail = sendTestEmail;
