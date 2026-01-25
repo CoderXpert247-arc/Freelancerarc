@@ -52,9 +52,16 @@ function generatePin() {
   return Math.floor(100000 + Math.random() * 900000).toString(); // 6-digit
 }
 
+function generateReferralCode() {
+  return Math.random().toString(36).substring(2, 8).toUpperCase(); // 6-character code
+}
+
 function findUser(pin) {
   return getUsers().find(u => u.pin === pin);
 }
+
+// =================== EMAIL OTP STORE ===================
+const otps = {}; // { pin: { code, expiresAt } }
 
 // =================== VOICE FLOW ===================
 app.post('/voice', (req, res) => {
@@ -64,31 +71,72 @@ app.post('/voice', (req, res) => {
   res.type('text/xml').send(twiml.toString());
 });
 
-app.post('/check-pin', (req, res) => {
+// =================== CHECK PIN / SEND EMAIL OTP ===================
+app.post('/check-pin', async (req, res) => {
   const twiml = new VoiceResponse();
   const pin = req.body.Digits;
   const user = findUser(pin);
 
   if (!user) {
-    twiml.say('Invalid pin.');
+    twiml.say('Invalid PIN.');
     twiml.hangup();
   } else {
-    const now = Date.now();
-    const planActive = user.planMinutes > 0 && now < user.planExpires;
-    const totalMinutes = (planActive ? user.planMinutes : 0) + (user.balance / RATE);
+    // Generate OTP
+    const otp = Math.floor(100000 + Math.random() * 900000).toString();
+    const expiresAt = Date.now() + 5 * 60 * 1000; // 5 minutes
+    otps[pin] = { code: otp, expiresAt };
 
-    if (totalMinutes <= 0) {
-      twiml.say('You have no minutes left.');
-      twiml.hangup();
-    } else {
-      twiml.gather({ numDigits: 15, action: `/dial-number?pin=${pin}`, method: 'POST' })
-           .say('Pin accepted. Enter the number.');
+    // Send OTP via email
+    try {
+      await sendEmail(user.email, "Your OTP Code", {
+        email: user.email,
+        message: `Your one-time code is: ${otp}. It expires in 5 minutes.`
+      });
+    } catch (err) {
+      console.error("Failed to send OTP email:", err.message);
     }
+
+    twiml.gather({
+      numDigits: 6,
+      action: `/verify-otp?pin=${pin}`,
+      method: 'POST'
+    }).say('We sent a verification code to your email. Enter the 6-digit code now.');
   }
 
   res.type('text/xml').send(twiml.toString());
 });
 
+// =================== VERIFY EMAIL OTP ===================
+app.post('/verify-otp', (req, res) => {
+  const twiml = new VoiceResponse();
+  const pin = req.query.pin;
+  const entered = req.body.Digits;
+
+  const otpData = otps[pin];
+  if (!otpData) {
+    twiml.say('No OTP found. Please try again.');
+    twiml.hangup();
+  } else if (Date.now() > otpData.expiresAt) {
+    delete otps[pin];
+    twiml.say('OTP expired. Please try again.');
+    twiml.hangup();
+  } else if (entered !== otpData.code) {
+    twiml.say('Incorrect code. Access denied.');
+    twiml.hangup();
+  } else {
+    // OTP correct, allow call
+    delete otps[pin];
+    twiml.gather({
+      numDigits: 15,
+      action: `/dial-number?pin=${pin}`,
+      method: 'POST'
+    }).say('OTP verified. Enter the number you want to call.');
+  }
+
+  res.type('text/xml').send(twiml.toString());
+});
+
+// =================== DIAL NUMBER ===================
 app.post('/dial-number', (req, res) => {
   const twiml = new VoiceResponse();
   const number = req.body.Digits;
@@ -128,6 +176,7 @@ app.post('/call-ended', async (req, res) => {
       user.balance = Math.max(0, user.balance - cost);
     }
 
+    user.totalCalls = (user.totalCalls || 0) + minutesUsed;
     saveUsers(users);
 
     // Send email asynchronously
@@ -138,7 +187,8 @@ app.post('/call-ended', async (req, res) => {
           message: `You used ${minutesUsed.toFixed(2)} minutes.`,
           balance: user.balance.toFixed(2),
           minutes: user.planMinutes.toFixed(2),
-          plan: user.planName || "None"
+          plan: user.planName || "None",
+          referralCode: user.referralCode
         });
       } catch (err) {
         console.error("Failed to send call summary email:", err.message);
@@ -159,12 +209,32 @@ app.post('/admin/create-user', async (req, res) => {
   if (key !== process.env.ADMIN_KEY) return res.status(403).json({ error: "Unauthorized" });
 
   const users = getUsers();
+
+  // ✅ Check if email already exists
+  if (users.find(u => u.email === email)) {
+    return res.status(400).json({ error: "User with this email already exists" });
+  }
+
+  // ✅ Generate unique PIN
   let pin;
   do { pin = generatePin(); } while (users.find(u => u.pin === pin));
 
-  const newUser = { pin, email, balance: 0, planMinutes: 0, planName: null, planExpires: null };
+  // ✅ Generate unique referral code
+  let referralCode;
+  do { referralCode = generateReferralCode(); } while (users.find(u => u.referralCode === referralCode));
 
-  if (amount) newUser.balance = parseFloat(amount);
+  // ✅ Create user object
+  const newUser = {
+    pin,
+    email,
+    balance: amount ? parseFloat(amount) : 0,
+    planMinutes: 0,
+    planName: null,
+    planExpires: null,
+    referralCode,
+    totalCalls: 0,
+    referralBonus: 0
+  };
 
   if (plan && PLANS[plan]) {
     const p = PLANS[plan];
@@ -182,10 +252,11 @@ app.post('/admin/create-user', async (req, res) => {
       await sendEmail(email, "Account Created", {
         email,
         pin,
-        balance: newUser.balance,
+        balance: newUser.balance.toFixed(2),
         minutes: newUser.planMinutes,
         plan: newUser.planName || "Wallet Only",
-        message: "Your calling account is ready."
+        message: "Your calling account is ready.",
+        referralCode: newUser.referralCode
       });
     } catch (err) {
       console.error("Failed to send account creation email:", err.message);
@@ -197,7 +268,8 @@ app.post('/admin/create-user', async (req, res) => {
     pin,
     balance: newUser.balance,
     plan: newUser.planName,
-    planMinutes: newUser.planMinutes
+    planMinutes: newUser.planMinutes,
+    referralCode: newUser.referralCode
   });
 });
 
@@ -218,7 +290,8 @@ app.post('/admin/topup', async (req, res) => {
       await sendEmail(user.email, "Wallet Top-up", {
         email: user.email,
         message: `Wallet credited with $${amount}`,
-        balance: user.balance
+        balance: user.balance,
+        referralCode: user.referralCode
       });
     } catch (err) {
       console.error("Failed to send top-up email:", err.message);
