@@ -4,17 +4,24 @@ const path = require('path');
 
 // ===== Transporter =====
 const transporter = nodemailer.createTransport({
-  service: 'gmail',
+  host: "smtp.gmail.com",
+  port: 465,
+  secure: true, // true for 465, false for 587
   auth: {
-    user: process.env.EMAIL_USER,      // your Gmail
-    pass: process.env.EMAIL_PASS       // App password
-  }
+    user: process.env.EMAIL_USER, // your Gmail
+    pass: process.env.EMAIL_PASS  // App password
+  },
+  tls: {
+    rejectUnauthorized: false, // allows self-signed certs
+  },
+  connectionTimeout: 10000, // 10 seconds
+  greetingTimeout: 10000,   // 10 seconds
+  socketTimeout: 10000,     // 10 seconds
 });
 
 // ===== Load and process HTML template =====
 function loadTemplate(data = {}) {
   try {
-    // Ensure correct path to template
     const templatePath = path.join(__dirname, 'templates', 'emailTemplates.html');
     if (!fs.existsSync(templatePath)) {
       throw new Error(`Email template not found at ${templatePath}`);
