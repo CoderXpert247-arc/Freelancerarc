@@ -1,23 +1,9 @@
-const nodemailer = require('nodemailer');
 const fs = require('fs');
 const path = require('path');
+const sgMail = require('@sendgrid/mail');
 
-// ===== Transporter =====
-const transporter = nodemailer.createTransport({
-  host: "smtp.gmail.com",
-  port: 465,
-  secure: true, // true for 465, false for 587
-  auth: {
-    user: process.env.EMAIL_USER, // your Gmail
-    pass: process.env.EMAIL_PASS  // App password
-  },
-  tls: {
-    rejectUnauthorized: false, // allows self-signed certs
-  },
-  connectionTimeout: 10000, // 10 seconds
-  greetingTimeout: 10000,   // 10 seconds
-  socketTimeout: 10000,     // 10 seconds
-});
+// ===== SendGrid setup =====
+sgMail.setApiKey(process.env.SENDGRID_API_KEY);
 
 // ===== Load and process HTML template =====
 function loadTemplate(data = {}) {
@@ -49,14 +35,15 @@ async function sendEmail(to, subject, templateData = {}) {
 
     const html = loadTemplate(templateData);
 
-    const info = await transporter.sendMail({
-      from: `"Call Gateway" <${process.env.EMAIL_USER}>`,
+    const msg = {
       to,
+      from: process.env.EMAIL_FROM, // verified SendGrid sender
       subject,
-      html
-    });
+      html,
+    };
 
-    console.log(`Email sent to ${to}: ${info.messageId}`);
+    const info = await sgMail.send(msg);
+    console.log(`Email sent to ${to}`);
     return info;
   } catch (err) {
     console.error(`Failed to send email to ${to}:`, err.message);
