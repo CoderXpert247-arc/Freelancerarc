@@ -2,13 +2,22 @@ require('dotenv').config();
 const express = require('express');
 const fs = require('fs');
 const twilio = require('twilio');
-const sendEmail = require('./mailer'); // 🔥 MAILER CONNECTED
+const sendEmail = require('./mailer');
 
 const { twiml: { VoiceResponse } } = twilio;
 const app = express();
 
 app.use(express.urlencoded({ extended: true }));
 app.use(express.json());
+
+// 🔥 Prevent server crash on bad JSON
+app.use((err, req, res, next) => {
+  if (err instanceof SyntaxError && err.status === 400 && 'body' in err) {
+    console.error("Bad JSON:", err.message);
+    return res.status(400).json({ error: "Invalid JSON format" });
+  }
+  next();
+});
 
 const client = twilio(process.env.TWILIO_ACCOUNT_SID, process.env.TWILIO_AUTH_TOKEN);
 const TWILIO_NUMBER = process.env.TWILIO_PHONE_NUMBER;
@@ -19,9 +28,9 @@ console.log("Rate per minute:", RATE);
 
 // =================== PLANS ===================
 const PLANS = {
-  DAILY_1:   { price: 1, minutes: 20, days: 1 },
-  DAILY_2:   { price: 2, minutes: 45, days: 1 },
-  WEEKLY_5:  { price: 5, minutes: 110, days: 7 },
+  DAILY_1: { price: 1, minutes: 20, days: 1 },
+  DAILY_2: { price: 2, minutes: 45, days: 1 },
+  WEEKLY_5: { price: 5, minutes: 110, days: 7 },
   WEEKLY_10: { price: 10, minutes: 240, days: 7 },
   MONTHLY_20: { price: 20, minutes: 500, days: 30 },
   MONTHLY_35: { price: 35, minutes: 950, days: 30 },
@@ -40,7 +49,7 @@ function saveUsers(users) {
 }
 
 function generatePin() {
-  return Math.floor(100000 + Math.random() * 900000).toString();
+  return Math.floor(100000 + Math.random() * 900000).toString(); // 6-digit
 }
 
 function findUser(pin) {
@@ -65,8 +74,8 @@ app.post('/check-pin', (req, res) => {
     twiml.hangup();
   } else {
     const now = Date.now();
-    const planActive = user.planMinutes > 0 && user.planExpires && now < user.planExpires;
-    const totalMinutes = (planActive ? user.planMinutes : 0) + (user.balance > 0 ? user.balance / RATE : 0);
+    const planActive = user.planMinutes > 0 && now < user.planExpires;
+    const totalMinutes = (planActive ? user.planMinutes : 0) + (user.balance / RATE);
 
     if (totalMinutes <= 0) {
       twiml.say('You have no minutes left.');
@@ -121,7 +130,6 @@ app.post('/call-ended', async (req, res) => {
 
     saveUsers(users);
 
-    // 📧 EMAIL CALL SUMMARY
     if (user.email) {
       await sendEmail(user.email, "Call Summary", {
         email: user.email,
@@ -151,7 +159,7 @@ app.post('/admin/create-user', async (req, res) => {
 
   if (amount) newUser.balance = parseFloat(amount);
 
-  if (plan) {
+  if (plan && PLANS[plan]) {
     const p = PLANS[plan];
     newUser.planMinutes = p.minutes;
     newUser.planName = plan;
@@ -161,7 +169,6 @@ app.post('/admin/create-user', async (req, res) => {
   users.push(newUser);
   saveUsers(users);
 
-  // 📧 EMAIL ACCOUNT CREATED
   if (email) {
     await sendEmail(email, "Account Created", {
       email,
@@ -183,6 +190,8 @@ app.post('/admin/topup', async (req, res) => {
 
   const users = getUsers();
   const user = users.find(u => u.pin === pin);
+  if (!user) return res.status(404).json({ error: "User not found" });
+
   user.balance += parseFloat(amount);
   saveUsers(users);
 
