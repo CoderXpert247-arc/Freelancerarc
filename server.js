@@ -210,20 +210,16 @@ app.post('/admin/create-user', async (req, res) => {
 
   const users = getUsers();
 
-  // ✅ Check if email already exists
   if (users.find(u => u.email === email)) {
     return res.status(400).json({ error: "User with this email already exists" });
   }
 
-  // ✅ Generate unique PIN
   let pin;
   do { pin = generatePin(); } while (users.find(u => u.pin === pin));
 
-  // ✅ Generate unique referral code
   let referralCode;
   do { referralCode = generateReferralCode(); } while (users.find(u => u.referralCode === referralCode));
 
-  // ✅ Create user object
   const newUser = {
     pin,
     email,
@@ -246,7 +242,6 @@ app.post('/admin/create-user', async (req, res) => {
   users.push(newUser);
   saveUsers(users);
 
-  // Send account creation email
   if (email) {
     try {
       await sendEmail(email, "Account Created", {
@@ -299,6 +294,45 @@ app.post('/admin/topup', async (req, res) => {
   }
 
   res.json({ balance: user.balance });
+});
+
+// Activate a plan for a user
+app.post('/admin/activate-plan', async (req, res) => {
+  const { pin, plan, key } = req.body;
+  if (key !== process.env.ADMIN_KEY) return res.status(403).json({ error: "Unauthorized" });
+
+  const users = getUsers();
+  const user = users.find(u => u.pin === pin);
+  if (!user) return res.status(404).json({ error: "User not found" });
+
+  if (!PLANS[plan]) return res.status(400).json({ error: "Invalid plan" });
+
+  const p = PLANS[plan];
+  user.planMinutes = p.minutes;
+  user.planName = plan;
+  user.planExpires = Date.now() + p.days * 86400000;
+
+  saveUsers(users);
+
+  if (user.email) {
+    try {
+      await sendEmail(user.email, "Plan Activated", {
+        email: user.email,
+        plan: user.planName,
+        minutes: user.planMinutes,
+        message: `Your plan "${plan}" is now active and valid for ${p.days} day(s).`
+      });
+    } catch (err) {
+      console.error("Failed to send plan activation email:", err.message);
+    }
+  }
+
+  res.json({
+    message: "Plan activated",
+    plan: user.planName,
+    minutes: user.planMinutes,
+    expiresAt: new Date(user.planExpires).toISOString()
+  });
 });
 
 // =================== HEALTH CHECK ===================
