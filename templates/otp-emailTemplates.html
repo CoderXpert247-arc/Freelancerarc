@@ -4,196 +4,145 @@
   <meta charset="UTF-8">
   <title>{{title}}</title>
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-
-  <!-- Shrikhand font -->
   <link href="https://fonts.googleapis.com/css2?family=Shrikhand&display=swap" rel="stylesheet">
-
-  <style>
-    body {
-      margin:0;
-      padding:0;
-      background:#F5F7FB;
-      font-family: 'Helvetica Neue', Helvetica, Arial, sans-serif;
-    }
-
-    img, svg { display:block; max-width:100%; }
-    a { text-decoration:none; color:inherit; }
-
-    .container {
-      max-width:600px;
-      width:100%;
-      margin:0 auto;
-      padding:20px 24px;
-      box-sizing:border-box;
-    }
-
-    .logo-box{
-      display:inline-flex;
-      align-items:center;
-      gap:14px;
-      padding:16px 26px;
-      background:#0052FF;
-      border-radius:14px;
-      box-shadow:0 12px 30px rgba(0,0,0,0.15);
-      width:fit-content;
-      margin-bottom:24px;
-    }
-
-    .logo-box span{
-      color:white;
-      font-size:48px;
-      font-family:'Shrikhand', cursive;
-      letter-spacing:0.5px;
-      line-height:1;
-    }
-
-    .card {
-      background:#FFFFFF;
-      border-radius:12px;
-      padding:32px 24px;
-      box-shadow:0 4px 12px rgba(0,0,0,0.05);
-      display:flex;
-      flex-direction:column;
-      gap:24px;
-      position:relative;
-    }
-
-    .greeting { display:flex; flex-direction:column; gap:12px; }
-    .greeting h2 { font-size:24px; font-weight:700; color:#384860; margin:0; }
-    .greeting p { font-size:16px; color:#121A26; line-height:1.6; margin:0; }
-
-    /* OTP Boxes */
-    .otp-boxes {
-      display:flex;
-      justify-content:space-between;
-      gap:12px;
-      margin-top:16px;
-    }
-
-   .otp-box {
-  width:48px;
-  height:60px;
-  background: rgba(255, 255, 255, 0.25); /* subtle glassy transparency */
-  border:2px solid #000; /* keep black border */
-  border-radius:8px;
-  display:flex;
-  justify-content:center;
-  align-items:center;
-  font-size:24px;
-  font-weight:bold;
-  color:#0052FF;
-  font-family:'Shrikhand', cursive;
-  backdrop-filter: blur(6px); /* subtle glass effect */
-  -webkit-backdrop-filter: blur(6px); /* for Safari support */
-}
-
-    .button {
-      display:flex;
-      justify-content:center;
-      align-items:center;
-      background:#0052FF;
-      color:#fff;
-      padding:16px 32px;
-      border-radius:8px;
-      font-weight:bold;
-      font-size:16px;
-      border:none;
-      margin-top:16px;
-    }
-
-    .social-icons {
-      display:flex;
-      gap:14px;
-      justify-content:right;
-      margin-top:16px;
-    }
-    .social-icons svg { width:26px; height:26px; fill:black; }
-
-    .footer {
-      font-size:14px;
-      color:#999;
-      line-height:1.6;
-      text-align:center;
-      padding:16px 0 0 0;
-    }
-
-    @media screen and (max-width: 480px) {
-      .card { padding:24px 16px; gap:20px; }
-      .greeting h2 { font-size:20px; }
-      .greeting p { font-size:14px; }
-      .logo-box span { font-size:36px; }
-      .otp-box { width:40px; height:50px; font-size:20px; }
-      .button { padding:12px 24px; font-size:14px; }
-      .social-icons svg { width:24px; height:24px; }
-    }
-  </style>
 </head>
+<body style="margin:0; padding:0; background:#F5F7FB; font-family:'Helvetica Neue', Helvetica, Arial, sans-serif;">
 
-<body>
+<!-- Outer container -->
+<table width="100%" cellpadding="0" cellspacing="0" border="0" bgcolor="#F5F7FB">
+  <tr>
+    <td align="center">
 
-<div class="container">
+      <!-- Inner container -->
+      <table width="600" cellpadding="0" cellspacing="0" border="0" style="max-width:600px; width:100%; margin:0 auto; padding:20px 24px;">
 
-  <!-- Logo -->
-  <div class="logo-box">
-    <svg width="60" height="60" viewBox="0 0 120 80" xmlns="http://www.w3.org/2000/svg">
-      <g fill="none" stroke="#FFFFFF" stroke-width="8" stroke-linecap="round" stroke-linejoin="round">
-        <path d="M5 60 L30 20 L55 60 L80 35 L105 60"/>
-        <path d="M20 50 Q45 25 70 50" stroke-width="5"/>
-      </g>
-    </svg>
-    <span>teld</span>
-  </div>
+        <!-- Logo Box -->
+        <tr>
+          <td align="left" style="padding-bottom:24px;">
+            <table cellpadding="0" cellspacing="0" border="0" style="background:#0052FF; border-radius:14px; padding:16px 26px; display:inline-block;">
+              <tr>
+                <td valign="middle" style="padding-right:14px;">
+                  <svg width="60" height="60" viewBox="0 0 120 80" xmlns="http://www.w3.org/2000/svg">
+                    <g fill="none" stroke="#FFFFFF" stroke-width="8" stroke-linecap="round" stroke-linejoin="round">
+                      <path d="M5 60 L30 20 L55 60 L80 35 L105 60"/>
+                      <path d="M20 50 Q45 25 70 50" stroke-width="5"/>
+                    </g>
+                  </svg>
+                </td>
+                <td valign="middle">
+                  <span style="color:white; font-size:48px; font-family:'Shrikhand', cursive; letter-spacing:0.5px; line-height:1;">teld</span>
+                </td>
+              </tr>
+            </table>
+          </td>
+        </tr>
 
-  <!-- Main Card -->
-  <div class="card">
+        <!-- Main Card -->
+        <tr>
+          <td>
+            <table width="100%" cellpadding="0" cellspacing="0" border="0" bgcolor="#FFFFFF" style="border-radius:12px; padding:32px 24px; box-shadow:0 4px 12px rgba(0,0,0,0.05);">
 
-    <div class="greeting">
-      <h2>{{title}}</h2>
-      <p>Hello <b>{{email}}</b>,<br><br>{{message}}</p>
-    </div>
+              <!-- Greeting -->
+              <tr>
+                <td style="padding-bottom:24px;">
+                  <h2 style="margin:0; font-size:24px; font-weight:700; color:#384860;">{{title}}</h2>
+                  <p style="margin:12px 0 0 0; font-size:16px; color:#121A26; line-height:1.6;">
+                    Hello <b>{{email}}</b>,<br><br>{{message}}
+                  </p>
+                </td>
+              </tr>
 
-    <!-- OTP Boxes -->
-    <div class="otp-boxes">
-      <div class="otp-box">{{otp1}}</div>
-      <div class="otp-box">{{otp2}}</div>
-      <div class="otp-box">{{otp3}}</div>
-      <div class="otp-box">{{otp4}}</div>
-      <div class="otp-box">{{otp5}}</div>
-      <div class="otp-box">{{otp6}}</div>
-    </div>
+              <!-- OTP Boxes -->
+              <tr>
+                <td style="padding-bottom:24px;">
+                  <table cellpadding="0" cellspacing="0" border="0" width="100%">
+                    <tr>
+                      <td align="center" style="padding:0;">
+                        <table cellpadding="0" cellspacing="0" border="0">
+                          <tr>
+                            <td style="width:48px; height:60px; border:2px solid #000; border-radius:8px; text-align:center; vertical-align:middle; font-size:24px; font-weight:bold; color:#0052FF; font-family:'Shrikhand', cursive; background:rgba(255,255,255,0.25);">
+                              {{otp1}}
+                            </td>
+                            <td width="12"></td>
+                            <td style="width:48px; height:60px; border:2px solid #000; border-radius:8px; text-align:center; vertical-align:middle; font-size:24px; font-weight:bold; color:#0052FF; font-family:'Shrikhand', cursive; background:rgba(255,255,255,0.25);">
+                              {{otp2}}
+                            </td>
+                            <td width="12"></td>
+                            <td style="width:48px; height:60px; border:2px solid #000; border-radius:8px; text-align:center; vertical-align:middle; font-size:24px; font-weight:bold; color:#0052FF; font-family:'Shrikhand', cursive; background:rgba(255,255,255,0.25);">
+                              {{otp3}}
+                            </td>
+                            <td width="12"></td>
+                            <td style="width:48px; height:60px; border:2px solid #000; border-radius:8px; text-align:center; vertical-align:middle; font-size:24px; font-weight:bold; color:#0052FF; font-family:'Shrikhand', cursive; background:rgba(255,255,255,0.25);">
+                              {{otp4}}
+                            </td>
+                            <td width="12"></td>
+                            <td style="width:48px; height:60px; border:2px solid #000; border-radius:8px; text-align:center; vertical-align:middle; font-size:24px; font-weight:bold; color:#0052FF; font-family:'Shrikhand', cursive; background:rgba(255,255,255,0.25);">
+                              {{otp5}}
+                            </td>
+                            <td width="12"></td>
+                            <td style="width:48px; height:60px; border:2px solid #000; border-radius:8px; text-align:center; vertical-align:middle; font-size:24px; font-weight:bold; color:#0052FF; font-family:'Shrikhand', cursive; background:rgba(255,255,255,0.25);">
+                              {{otp6}}
+                            </td>
+                          </tr>
+                        </table>
+                      </td>
+                    </tr>
+                  </table>
+                </td>
+              </tr>
 
-    <!-- Account Update Button -->
-    <button class="button">Account Updates</button>
+              <!-- Account Update Button -->
+              <tr>
+                <td align="center" style="padding-bottom:24px;">
+                  <a href="#" style="background:#0052FF; color:#fff; padding:16px 32px; border-radius:8px; font-weight:bold; font-size:16px; text-decoration:none; display:inline-block;">Account Updates</a>
+                </td>
+              </tr>
 
-    <!-- Social Icons -->
-    <div class="social-icons">
-      <!-- Facebook -->
-      <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 50 50">
-        <path d="M42,3H8C5.2,3,3,5.2,3,8v34c0,2.8,2.2,5,5,5h34c2.8,0,5-2.2,5-5V8C47,5.2,44.8,3,42,3z M37,19h-2c-2.1,0-3,0.5-3,2v3h5 l-1,5h-4v16h-5V29h-4v-5h4v-3c0-4,2-7,6-7c2.9,0,4,1,4,1V19z"/>
-      </svg>
-      <!-- Instagram -->
-      <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 50 50">
-        <path d="M 16 3 C 8.83 3 3 8.83 3 16 L 3 34 C 3 41.17 8.83 47 16 47 L 34 47 C 41.17 47 47 41.17 47 34 L 47 16 C 47 8.83 41.17 3 34 3 L 16 3 z M 37 11 C 38.1 11 39 11.9 39 13 C 39 14.1 38.1 15 37 15 C 35.9 15 35 14.1 35 13 C 35 11.9 35.9 11 37 11 z M 25 14 C 31.07 14 36 18.93 36 25 C 36 31.07 31.07 36 25 36 C 18.93 36 14 31.07 14 25 C 14 18.93 18.93 14 25 14 z M 25 16 C 20.04 16 16 20.04 16 25 C 16 29.96 20.04 34 25 34 C 29.96 34 34 29.96 34 25 C 34 20.04 29.96 16 25 16 z"/>
-      </svg>
-      <!-- WhatsApp -->
-      <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 50 50">
-        <path d="M 25 2 C 12.318 2 2 12.318 2 25 C 2 28.96 3.0228906 32.853062 4.9628906 36.289062 L 2.0371094 46.730469 C 1.9411094 47.073469 2.03325 47.440312 2.28125 47.695312 C 2.47225 47.892313 2.733 48 3 48 C 3.08 48 3.1612344 47.989703 3.2402344 47.970703 L 14.136719 45.271484 C 17.463719 47.057484 21.21 48 25 48 C 37.682 48 48 37.682 48 25 C 48 12.318 37.682 2 25 2 z M 16.642578 14 C 17.036578 14 17.428437 14.005484 17.773438 14.021484 C 18.136437 14.039484 18.624516 13.883484 19.103516 15.021484 C 19.595516 16.189484 20.775875 19.058563 20.921875 19.351562 C 21.069875 19.643563 21.168656 19.984047 20.972656 20.373047 C 20.776656 20.762047 20.678813 21.006656 20.382812 21.347656 C 20.086813 21.688656 19.762094 22.107141 19.496094 22.369141 C 19.200094 22.660141 18.892328 22.974594 19.236328 23.558594 C 19.580328 24.142594 20.765484 26.051656 22.521484 27.597656 C 24.776484 29.583656 26.679531 30.200188 27.269531 30.492188 C 27.859531 30.784188 28.204828 30.734703 28.548828 30.345703 C 28.892828 29.955703 30.024969 28.643547 30.417969 28.060547 C 30.810969 27.477547 31.204094 27.572578 31.746094 27.767578 C 32.288094 27.961578 35.19125 29.372062 35.78125 29.664062 C 36.37125 29.956063 36.766062 30.102703 36.914062 30.345703 C 37.062062 30.587703 37.062312 31.754234 36.570312 33.115234 C 36.078313 34.477234 33.717984 35.721672 32.583984 35.888672 C 31.565984 36.037672 30.277281 36.10025 28.863281 35.65625 C 28.006281 35.38625 26.907047 35.028734 25.498047 34.427734 C 19.575047 31.901734 15.706156 26.012047 15.410156 25.623047 C 15.115156 25.234047 13 22.46275 13 19.59375 C 13 16.72475 14.524406 15.314469 15.066406 14.730469 C 15.608406 14.146469 16.248578 14 16.642578 14 z"/>
-      </svg>
-    </div>
+              <!-- Social Icons -->
+              <tr>
+                <td align="right" style="padding-bottom:0;">
+                  <table cellpadding="0" cellspacing="0" border="0">
+                    <tr>
+                      <td style="padding-left:8px;">
+                        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 50 50" width="26" height="26" fill="#000">
+                          <path d="M42,3H8C5.2,3,3,5.2,3,8v34c0,2.8,2.2,5,5,5h34c2.8,0,5-2.2,5-5V8C47,5.2,44.8,3,42,3z M37,19h-2c-2.1,0-3,0.5-3,2v3h5 l-1,5h-4v16h-5V29h-4v-5h4v-3c0-4,2-7,6-7c2.9,0,4,1,4,1V19z"/>
+                        </svg>
+                      </td>
+                      <td style="padding-left:8px;">
+                        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 50 50" width="26" height="26" fill="#000">
+                          <path d="M16 3C8.83 3 3 8.83 3 16v18c0 7.17 5.83 13 13 13h18c7.17 0 13-5.83 13-13V16c0-7.17-5.83-13-13-13H16z M37 11c1.1 0 2 .9 2 2s-.9 2-2 2-2-.9-2-2 .9-2 2-2zm-12 3c6.07 0 11 4.93 11 11s-4.93 11-11 11-11-4.93-11-11 4.93-11 11-11zm0 2c-4.96 0-9 4.04-9 9s4.04 9 9 9 9-4.04 9-9-4.04-9-9-9z"/>
+                        </svg>
+                      </td>
+                      <td style="padding-left:8px;">
+                        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 50 50" width="26" height="26" fill="#000">
+                          <path d="M25 2C12.318 2 2 12.318 2 25c0 3.96 1.023 7.853 2.963 11.289L2.037 46.73c-.096.343-.004.71.244.965.191.197.452.305.719.305.08 0 .161-.01.24-.03l10.896-2.699c3.327 1.786 7.073 2.729 10.863 2.729 12.682 0 23-10.318 23-23S37.682 2 25 2zm-8.358 12c.394 0 .786.005 1.131.021.363.018.851-.138 1.33 1.0.492 1.168 1.672 4.037 1.818 4.33.148.292.247.632.051 1.021-.196.389-.294.634-.59.975-.296.341-.62.76-.886 1.022-.296.291-.604.605-.248 1.189.344.584 1.529 2.493 3.285 4.039 2.255 1.986 4.158 2.603 4.748 2.895.59.292.935.242 1.279-.147.344-.391 1.476-1.703 1.869-2.286.393-.583.786-.488 1.328-.293.542.194 3.445 1.605 4.035 1.897.59.292.985.438 1.133.681.148.242.148 1.409-.344 2.77-.492 1.362-2.853 2.606-3.987 2.773-1.018.149-2.306.212-3.72-.232-.857-.27-1.957-.628-3.366-1.229-5.923-2.526-9.792-8.416-10.088-8.805-.295-.389-2.41-2.16-2.41-5.029s1.524-3.41 2.066-3.994c.542-.584 1.182-.73 1.576-.73z"/>
+                        </svg>
+                      </td>
+                    </tr>
+                  </table>
+                </td>
+              </tr>
 
-  </div>
+            </table>
+          </td>
+        </tr>
 
-  <!-- Footer -->
-  <div class="footer">
-    This email was sent to <b>{{email}}</b>. Replies are not monitored. If you did not expect this email, you may safely ignore it.<br><br>
-    © 2026 Teld Communications, 5b Fawole Street #200, Lagos, Ojo 90017-6410, Nigeria
-    <br><br>
-    <small style="color:#666; line-height:1.4;">
-      ⚠️ Please keep your OTP confidential. Unauthorized use may lead to account access by others.
-    </small>
-  </div>
+        <!-- Footer -->
+        <tr>
+          <td style="font-size:14px; color:#999; line-height:1.6; text-align:center; padding-top:16px;">
+            This email was sent to <b>{{email}}</b>. Replies are not monitored. If you did not expect this email, you may safely ignore it.<br><br>
+            © 2026 Teld Communications, 5b Fawole Street #200, Lagos, Ojo 90017-6410, Nigeria<br><br>
+            <small style="color:#666; line-height:1.4;">
+              ⚠️ Please keep your OTP confidential. Unauthorized use may lead to account access by others.
+            </small>
+          </td>
+        </tr>
 
-</div>
+      </table>
+
+    </td>
+  </tr>
+</table>
 
 </body>
 </html>
