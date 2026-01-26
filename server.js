@@ -66,8 +66,21 @@ const otps = {}; // { pin: { code, expiresAt } }
 // =================== VOICE FLOW ===================
 app.post('/voice', (req, res) => {
   const twiml = new VoiceResponse();
-  twiml.gather({ numDigits: 6, action: '/check-pin', method: 'POST' })
-       .say('Welcome. Enter your six digit access pin.');
+  const caller = req.body.From; // caller number
+
+  const user = getUsers().find(u => u.phone === caller);
+
+  if (!user) {
+    twiml.say({ voice: 'alice' }, "You are not registered to call this number. Goodbye.");
+    twiml.hangup();
+  } else if (user.balance <= 0 && user.planMinutes <= 0) {
+    twiml.say({ voice: 'alice' }, "Insufficient balance. Please top up your account to make calls.");
+    twiml.hangup();
+  } else {
+    twiml.gather({ numDigits: 6, action: '/check-pin', method: 'POST' })
+         .say({ voice: 'alice' }, 'Welcome. Enter your six digit access PIN.');
+  }
+
   res.type('text/xml').send(twiml.toString());
 });
 
@@ -78,7 +91,10 @@ app.post('/check-pin', async (req, res) => {
   const user = findUser(pin);
 
   if (!user) {
-    twiml.say('Invalid PIN.');
+    twiml.say({ voice: 'alice' }, 'Invalid PIN.');
+    twiml.hangup();
+  } else if (!user.phone) {
+    twiml.say({ voice: 'alice' }, 'Your phone number is not registered. Contact admin.');
     twiml.hangup();
   } else {
     // Generate OTP
@@ -100,7 +116,7 @@ app.post('/check-pin', async (req, res) => {
       numDigits: 6,
       action: `/verify-otp?pin=${pin}`,
       method: 'POST'
-    }).say('We sent a verification code to your email. Enter the 6-digit code now.');
+    }).say({ voice: 'alice' }, 'We sent a verification code to your email. Enter the 6-digit code now.');
   }
 
   res.type('text/xml').send(twiml.toString());
@@ -111,26 +127,35 @@ app.post('/verify-otp', (req, res) => {
   const twiml = new VoiceResponse();
   const pin = req.query.pin;
   const entered = req.body.Digits;
+  const user = findUser(pin);
+
+  if (!user) {
+    twiml.say({ voice: 'alice' }, "User not found.");
+    twiml.hangup();
+    return res.type('text/xml').send(twiml.toString());
+  }
 
   const otpData = otps[pin];
   if (!otpData) {
-    twiml.say('No OTP found. Please try again.');
+    twiml.say({ voice: 'alice' }, 'No OTP found. Please try again.');
     twiml.hangup();
   } else if (Date.now() > otpData.expiresAt) {
     delete otps[pin];
-    twiml.say('OTP expired. Please try again.');
+    twiml.say({ voice: 'alice' }, 'OTP expired. Please try again.');
     twiml.hangup();
   } else if (entered !== otpData.code) {
-    twiml.say('Incorrect code. Access denied.');
+    twiml.say({ voice: 'alice' }, 'Incorrect code. Access denied.');
+    twiml.hangup();
+  } else if (user.balance <= 0 && user.planMinutes <= 0) {
+    twiml.say({ voice: 'alice' }, "Insufficient balance. Cannot proceed with call.");
     twiml.hangup();
   } else {
-    // OTP correct, allow call
     delete otps[pin];
     twiml.gather({
       numDigits: 15,
       action: `/dial-number?pin=${pin}`,
       method: 'POST'
-    }).say('OTP verified. Enter the number you want to call.');
+    }).say({ voice: 'alice' }, 'OTP verified. Enter the number you want to call.');
   }
 
   res.type('text/xml').send(twiml.toString());
@@ -141,14 +166,23 @@ app.post('/dial-number', (req, res) => {
   const twiml = new VoiceResponse();
   const number = req.body.Digits;
   const pin = req.query.pin;
+  const user = findUser(pin);
 
-  const dial = twiml.dial({
-    action: `/call-ended?pin=${pin}`,
-    method: 'POST',
-    callerId: TWILIO_NUMBER
-  });
+  if (!user) {
+    twiml.say({ voice: 'alice' }, "User not found.");
+    twiml.hangup();
+  } else if (user.balance <= 0 && user.planMinutes <= 0) {
+    twiml.say({ voice: 'alice' }, "Insufficient balance. Cannot make this call.");
+    twiml.hangup();
+  } else {
+    const dial = twiml.dial({
+      action: `/call-ended?pin=${pin}`,
+      method: 'POST',
+      callerId: TWILIO_NUMBER
+    });
+    dial.number(number);
+  }
 
-  dial.number(number);
   res.type('text/xml').send(twiml.toString());
 });
 
@@ -179,7 +213,6 @@ app.post('/call-ended', async (req, res) => {
     user.totalCalls = (user.totalCalls || 0) + minutesUsed;
     saveUsers(users);
 
-    // Send email asynchronously
     if (user.email) {
       try {
         await sendEmail(user.email, "Call Summary", {
@@ -205,7 +238,7 @@ app.post('/call-ended', async (req, res) => {
 
 // Create new user
 app.post('/admin/create-user', async (req, res) => {
-  const { amount, plan, key, email } = req.body;
+  const { amount, plan, key, email, phone } = req.body;
   if (key !== process.env.ADMIN_KEY) return res.status(403).json({ error: "Unauthorized" });
 
   const users = getUsers();
@@ -223,6 +256,7 @@ app.post('/admin/create-user', async (req, res) => {
   const newUser = {
     pin,
     email,
+    phone, // registered phone
     balance: amount ? parseFloat(amount) : 0,
     planMinutes: 0,
     planName: null,
@@ -264,74 +298,8 @@ app.post('/admin/create-user', async (req, res) => {
     balance: newUser.balance,
     plan: newUser.planName,
     planMinutes: newUser.planMinutes,
-    referralCode: newUser.referralCode
-  });
-});
-
-// Top-up
-app.post('/admin/topup', async (req, res) => {
-  const { pin, amount, key } = req.body;
-  if (key !== process.env.ADMIN_KEY) return res.status(403).json({ error: "Unauthorized" });
-
-  const users = getUsers();
-  const user = users.find(u => u.pin === pin);
-  if (!user) return res.status(404).json({ error: "User not found" });
-
-  user.balance += parseFloat(amount);
-  saveUsers(users);
-
-  if (user.email) {
-    try {
-      await sendEmail(user.email, "Wallet Top-up", {
-        email: user.email,
-        message: `Wallet credited with $${amount}`,
-        balance: user.balance,
-        referralCode: user.referralCode
-      });
-    } catch (err) {
-      console.error("Failed to send top-up email:", err.message);
-    }
-  }
-
-  res.json({ balance: user.balance });
-});
-
-// Activate a plan for a user
-app.post('/admin/activate-plan', async (req, res) => {
-  const { pin, plan, key } = req.body;
-  if (key !== process.env.ADMIN_KEY) return res.status(403).json({ error: "Unauthorized" });
-
-  const users = getUsers();
-  const user = users.find(u => u.pin === pin);
-  if (!user) return res.status(404).json({ error: "User not found" });
-
-  if (!PLANS[plan]) return res.status(400).json({ error: "Invalid plan" });
-
-  const p = PLANS[plan];
-  user.planMinutes = p.minutes;
-  user.planName = plan;
-  user.planExpires = Date.now() + p.days * 86400000;
-
-  saveUsers(users);
-
-  if (user.email) {
-    try {
-      await sendEmail(user.email, "Plan Activated", {
-        email: user.email,
-        plan: user.planName,
-        minutes: user.planMinutes,
-        message: `Your plan "${plan}" is now active and valid for ${p.days} day(s).`
-      });
-    } catch (err) {
-      console.error("Failed to send plan activation email:", err.message);
-    }
-  }
-
-  res.json({
-    message: "Plan activated",
-    plan: user.planName,
-    minutes: user.planMinutes,
-    expiresAt: new Date(user.planExpires).toISOString()
+    referralCode: newUser.referralCode,
+    phone: newUser.phone
   });
 });
 
