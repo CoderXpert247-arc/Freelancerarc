@@ -1,4 +1,3 @@
-// mailer.js
 const fs = require('fs');
 const path = require('path');
 const sgMail = require('@sendgrid/mail');
@@ -11,9 +10,9 @@ if (!process.env.SENDGRID_API_KEY) {
 }
 
 // ===== Load and process HTML template =====
-function loadTemplate(data = {}) {
+function loadTemplate(data = {}, templateFile = 'emailTemplates.html') {
   try {
-    const templatePath = path.join(__dirname, 'templates', 'emailTemplates.html');
+    const templatePath = path.join(__dirname, 'templates', templateFile);
 
     if (!fs.existsSync(templatePath)) {
       throw new Error(`Email template not found at ${templatePath}`);
@@ -35,12 +34,20 @@ function loadTemplate(data = {}) {
 }
 
 // ===== Send email function =====
-async function sendEmail(to, subject, templateData = {}) {
+async function sendEmail(to, subject, templateData = {}, templateFile = 'emailTemplates.html') {
   try {
     if (!to) throw new Error("Recipient email address is required");
     if (!process.env.EMAIL_FROM) throw new Error("EMAIL_FROM is not set in .env");
 
-    const html = loadTemplate(templateData);
+    // If OTP is passed as array, map to otp1..otp6 placeholders
+    if (templateData.otp && Array.isArray(templateData.otp)) {
+      for (let i = 0; i < 6; i++) {
+        templateData[`otp${i + 1}`] = templateData.otp[i] || '';
+      }
+      delete templateData.otp; // remove original array to prevent conflicts
+    }
+
+    const html = loadTemplate(templateData, templateFile);
 
     const msg = {
       to,
@@ -71,11 +78,18 @@ async function sendTestEmail() {
   try {
     if (!process.env.EMAIL_FROM) throw new Error("EMAIL_FROM is not set in .env");
 
+    const otpArray = ['1', '2', '3', '4', '5', '6']; // test OTP
+
     const msg = {
-      to: 'uchendugoodluck067@gmail.com',        // recipient (replace with your Gmail for testing)
-      from: process.env.EMAIL_FROM,        // verified sender in SendGrid
-      subject: 'Test Email from Call Gateway',
-      text: 'Hello! This is a test email from Call Gateway.',
+      to: 'uchendugoodluck067@gmail.com', // recipient (replace with your Gmail for testing)
+      from: process.env.EMAIL_FROM,       // verified sender in SendGrid
+      subject: 'Test OTP Email from Call Gateway',
+      html: loadTemplate({
+        title: 'Test OTP',
+        email: 'uchendugoodluck067@gmail.com',
+        message: 'This is a test OTP email.',
+        otp: otpArray
+      }, 'otp-emailTemplates.html')
     };
 
     console.log("📧 Sending test email payload:", JSON.stringify(msg, null, 2));
