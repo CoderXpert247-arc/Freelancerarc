@@ -319,9 +319,10 @@ app.post('/admin/create-user', async (req, res) => {
       await sendEmail(email, "Account Created", {
         email,
         pin,
-        balance: newUser.balance.toFixed(2),
-        minutes: newUser.planMinutes,
-        plan: newUser.planName || "Wallet Only",
+        balance: newUser.balance,
+        planName: newUser.planName || "Wallet Only",
+        planMinutes: newUser.planMinutes,
+        planExpires: newUser.planExpires,
         message: "Your calling account is ready.",
         referralCode: newUser.referralCode
       });
@@ -366,6 +367,10 @@ app.post('/admin/topup', async (req, res) => {
     try {
       await sendEmail(user.email, "Wallet Top-up", {
         email: user.email,
+        balance: user.balance,
+        planName: user.planName || "Wallet Only",
+        planMinutes: user.planMinutes,
+        planExpires: user.planExpires,
         message: `Your account has been topped up by $${topupAmount.toFixed(2)}. Current balance: $${user.balance.toFixed(2)}.`
       });
     } catch (err) {
@@ -385,8 +390,6 @@ app.post('/admin/activate-plan', async (req, res) => {
   const user = users.find(u => u.email === email);
   if (!user) return res.status(404).json({ error: "User not found" });
 
-  const isUnlimited = email === "uchendugoodluck067@gmail.com";
-
   if (!PLANS[plan]) return res.status(400).json({ error: "Invalid plan" });
 
   const p = PLANS[plan];
@@ -400,8 +403,9 @@ app.post('/admin/activate-plan', async (req, res) => {
     try {
       await sendEmail(user.email, "Plan Activated", {
         email: user.email,
-        plan: plan,
-        minutes: user.planMinutes,
+        planName: user.planName,
+        planMinutes: user.planMinutes,
+        planExpires: user.planExpires,
         message: `Your plan ${plan} is now active and expires in ${p.days} day(s).`
       });
     } catch (err) {
