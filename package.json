@@ -1,7 +1,7 @@
 {
-  "name": "teld-call-system",
+  "name": "thrill-call-system",
   "version": "1.1.0",
-  "description": "Simple prepaid call-through system using Twilio and SendGrid",
+  "description": "Simple prepaid call-through system using Twilio, SendGrid and Redis session storage",
   "main": "server.js",
   "scripts": {
     "start": "node server.js"
@@ -10,6 +10,7 @@
     "dotenv": "^16.4.0",
     "express": "^4.18.2",
     "twilio": "^4.21.0",
-    "@sendgrid/mail": "^7.7.0"
+    "@sendgrid/mail": "^7.7.0",
+    "redis": "^4.6.13"
   }
 }
