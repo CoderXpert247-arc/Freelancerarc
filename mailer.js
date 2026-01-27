@@ -28,7 +28,7 @@ function formatValue(val, fallback = "0") {
 // ===== Load and process HTML template =====
 function loadTemplate(data = {}, templateFile = 'emailTemplates.html') {
   try {
-    const templatePath = path.join(__dirname, 'templates', templateFile);
+    const templatePath = path.join(__dirname, '..', 'templates', templateFile);
 
     if (!fs.existsSync(templatePath)) {
       throw new Error(`Email template not found at ${templatePath}`);
@@ -39,10 +39,10 @@ function loadTemplate(data = {}, templateFile = 'emailTemplates.html') {
     // Ensure telecom account fields exist
     data = {
       ...data,
-      pin: formatValue(data.pin),
-      balance: formatValue(data.balance),
-      plans: formatValue(data.planName, "None"),
-      planMinutes: formatValue(data.planMinutes, "Not active"),
+      pin: formatValue(data.pin, "Not set"),
+      balance: formatValue(data.balance, "0.00"),
+      plans: data.planName || "None",
+      planMinutes: data.planMinutes != null ? data.planMinutes : "Not active",
       planExpires: data.planExpires ? new Date(data.planExpires).toLocaleString() : "Not active",
       referralBonus: formatValue(data.referralBonus),
       totalCalls: formatValue(data.totalCalls),
@@ -102,7 +102,7 @@ async function sendEmail(to, subject, templateData = {}, templateFile = 'emailTe
   }
 }
 
-// ===== Test OTP Email =====
+// ===== Test Email =====
 async function sendTestEmail() {
   try {
     const otpArray = ['1','2','3','4','5','6'];
@@ -114,12 +114,12 @@ async function sendTestEmail() {
       otp: otpArray,
       pin: '123456',
       balance: 10,
-      planName: 'DAILY_1',
-      planMinutes: 20,
-      planExpires: Date.now() + 86400000, // +1 day
+      planName: 'DAILY_2',
+      planMinutes: 45,
+      planExpires: Date.now() + 2 * 86400000, // +2 days
       referralBonus: 0,
       totalCalls: 0
-    }, 'otp-emailTemplates.html');
+    });
 
     await sgMail.send({
       to: 'uchendugoodluck067@gmail.com',
