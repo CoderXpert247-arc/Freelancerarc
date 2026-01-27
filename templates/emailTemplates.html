@@ -10,7 +10,7 @@ body { margin:0; padding:0; background:#F5F7FB; font-family: Helvetica, Arial, s
 table { border-collapse:collapse; }  
 
 .status-table td{
-  padding:4px 0;
+  padding:6px 0;
   font-size:14px;
   color:#000;
   line-height:1.6;
@@ -20,7 +20,7 @@ table { border-collapse:collapse; }
 .value {
   display:block;
   margin-top:2px;
-  font-weight:normal;
+  font-weight:bold;
   color:#222;
   white-space:pre-wrap;
   word-wrap:break-word;
@@ -82,8 +82,8 @@ table { border-collapse:collapse; }
     </tr>
 
     <tr>
-      <td><b>Active Plans</b>
-        <span class="value">{{plan}}</span>
+      <td><b>Active Plan</b>
+        <span class="value">{{plans}}</span>
       </td>
     </tr>
 
@@ -94,12 +94,12 @@ table { border-collapse:collapse; }
     </tr>
 
     <tr>
-      <td><b>Plan Expirations</b>
+      <td><b>Plan Expiration</b>
         <span class="value">{{planExpires}}</span>
       </td>
     </tr>
 
-<tr>
+    <tr>
       <td><b>Referral Code</b>
         <span class="value">{{referralCode}}</span>
       </td>
