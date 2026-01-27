@@ -40,13 +40,12 @@ const PLANS = {
 };
 
 // =================== HELPERS ===================
-let fileLock = false;
+const USERS_FILE = path.join(__dirname, 'users.json');
 
 function getUsers() {
   try {
-    const filePath = path.join(__dirname, 'users.json');
-    if (!fs.existsSync(filePath)) fs.writeFileSync(filePath, '[]', 'utf8');
-    return JSON.parse(fs.readFileSync(filePath, 'utf8'));
+    if (!fs.existsSync(USERS_FILE)) fs.writeFileSync(USERS_FILE, '[]', 'utf8');
+    return JSON.parse(fs.readFileSync(USERS_FILE, 'utf8'));
   } catch (err) {
     console.error("❌ Failed to read users.json:", err.message);
     return [];
@@ -54,16 +53,11 @@ function getUsers() {
 }
 
 function saveUsers(users) {
-  while (fileLock) {}
-  fileLock = true;
   try {
-    const filePath = path.join(__dirname, 'users.json');
-    fs.writeFileSync(filePath, JSON.stringify(users, null, 2), 'utf8');
+    fs.writeFileSync(USERS_FILE, JSON.stringify(users, null, 2), 'utf8');
     console.log("✅ users.json updated successfully");
   } catch (err) {
     console.error("❌ Failed to save users.json:", err.message);
-  } finally {
-    fileLock = false;
   }
 }
 
@@ -271,161 +265,111 @@ app.post('/call-ended', async (req, res) => {
   res.sendStatus(200);
 });
 
-// =================== ADMIN ROUTES ===================    
-    
-// Create new user    
-app.post('/admin/create-user', async (req, res) => {    
-  const { amount, plan, key, email, phone } = req.body;    
-  if (key !== process.env.ADMIN_KEY) return res.status(403).json({ error: "Unauthorized" });    
-    
-  const users = getUsers();    
-    
-  // Allow unlimited creation ONLY for your Gmail    
-  const isUnlimited = email === "uchendugoodluck067@gmail.com";    
-    
-  if (!isUnlimited && users.find(u => u.email === email)) {    
-    return res.status(400).json({ error: "User with this email already exists" });    
-  }    
-    
-  // Generate unique PIN and referral code    
-  let pin;    
-  do { pin = generatePin(); } while (users.find(u => u.pin === pin));    
-    
-  let referralCode;    
-  do { referralCode = generateReferralCode(); } while (users.find(u => u.referralCode === referralCode));    
-    
-  // Initialize new user    
-  const newUser = {    
-    pin,    
-    email,    
-    phone,    
-    balance: amount ? parseFloat(amount) : 0,    
-    planMinutes: 0,    
-    planName: null,    
-    planExpires: null,    
-    referralCode,    
-    totalCalls: 0,    
-    referralBonus: 0    
-  };    
-    
-  // If a plan is specified, activate it immediately    
-  if (plan && PLANS[plan]) {    
-    const p = PLANS[plan];    
-    newUser.planMinutes = p.minutes;    
-    newUser.planName = plan;    
-    newUser.planExpires = Date.now() + p.days * 86400000; // current timestamp + plan duration    
-  }    
-    
-  users.push(newUser);    
-  saveUsers(users);    
-    
-  // Send account creation email    
-  if (email) {    
-    try {    
-      await sendEmail(email, "Account Created", {    
-        email,    
-        pin,    
-        balance: newUser.balance,    
-        planName: newUser.planName || "Wallet Only",    
-        planMinutes: newUser.planMinutes,    
-        planExpires: newUser.planExpires,    
-        message: "Your calling account is ready.",    
-        referralCode: newUser.referralCode    
-      });    
-    } catch (err) {    
-      console.error("Failed to send account creation email:", err.message);    
-    }    
-  }    
-    
-  res.json({    
-    message: "User created",    
-    pin,    
-    balance: newUser.balance,    
-    plan: newUser.planName,    
-    planMinutes: newUser.planMinutes,    
-    planExpires: newUser.planExpires ? new Date(newUser.planExpires) : null,    
-    referralCode: newUser.referralCode,    
-    phone: newUser.phone    
-  });    
-});    
-    
-// =================== ADMIN TOP-UP ===================    
-app.post('/admin/topup', async (req, res) => {    
-  const { key, email, amount } = req.body;    
-  if (key !== process.env.ADMIN_KEY) return res.status(403).json({ error: "Unauthorized" });    
-    
-  const users = getUsers();    
-  const user = users.find(u => u.email === email);    
-  if (!user) return res.status(404).json({ error: "User not found" });    
-    
-  const isUnlimited = email === "uchendugoodluck067@gmail.com";    
-  const topupAmount = parseFloat(amount) || 0;    
-    
-  user.balance += topupAmount;    
-    
-  if (!isUnlimited && user.balance > 10000) { // safety cap for normal users    
-    user.balance = 10000;    
-  }    
-    
-  saveUsers(users);    
-    
-  if (user.email) {    
-    try {    
-      await sendEmail(user.email, "Wallet Top-up", {    
-        email: user.email,    
-        balance: user.balance,    
-        planName: user.planName || "Wallet Only",    
-        planMinutes: user.planMinutes,    
-        planExpires: user.planExpires,    
-        message: `Your account has been topped up by $${topupAmount.toFixed(2)}. Current balance: $${user.balance.toFixed(2)}.`    
-      });    
-    } catch (err) {    
-      console.error("Failed to send top-up email:", err.message);    
-    }    
-  }    
-    
-  res.json({ message: "Top-up successful", balance: user.balance });    
-});    
-    
-// =================== ADMIN ACTIVATE PLAN ===================    
-app.post('/admin/activate-plan', async (req, res) => {    
-  const { key, email, plan } = req.body;    
-  if (key !== process.env.ADMIN_KEY) return res.status(403).json({ error: "Unauthorized" });    
-    
-  const users = getUsers();    
-  const user = users.find(u => u.email === email);    
-  if (!user) return res.status(404).json({ error: "User not found" });    
-    
-  if (!PLANS[plan]) return res.status(400).json({ error: "Invalid plan" });    
-    
-  const p = PLANS[plan];    
-  user.planMinutes = p.minutes;    
-  user.planName = plan;    
-  user.planExpires = Date.now() + p.days * 86400000;    
-    
-  saveUsers(users);    
-    
-  if (user.email) {    
-    try {    
-      await sendEmail(user.email, "Plan Activated", {    
-        email: user.email,    
-        planName: user.planName,    
-        planMinutes: user.planMinutes,    
-        planExpires: user.planExpires,    
-        message: `Your plan ${plan} is now active and expires in ${p.days} day(s).`    
-      });    
-    } catch (err) {    
-      console.error("Failed to send plan activation email:", err.message);    
-    }    
-  }    
-    
-  res.json({    
-    message: "Plan activated",    
-    plan: user.planName,    
-    minutes: user.planMinutes,    
-    expires: new Date(user.planExpires)    
-  });    
-});    
+// =================== ADMIN ROUTES ===================
+
+// Create new user
+app.post('/admin/create-user', async (req, res) => {
+  const { amount, plan, key, email, phone } = req.body;
+  if (key !== process.env.ADMIN_KEY) return res.status(403).json({ error: "Unauthorized" });
+
+  const users = getUsers();
+  const isUnlimited = email === "uchendugoodluck067@gmail.com";
+
+  if (!isUnlimited && users.find(u => u.email === email)) {
+    return res.status(400).json({ error: "User with this email already exists" });
+  }
+
+  let pin; do { pin = generatePin(); } while (users.find(u => u.pin === pin));
+  let referralCode; do { referralCode = generateReferralCode(); } while (users.find(u => u.referralCode === referralCode));
+
+  const newUser = {
+    pin,
+    email,
+    phone,
+    balance: amount ? parseFloat(amount) : 0,
+    planMinutes: 0,
+    planName: null,
+    planExpires: null,
+    referralCode,
+    totalCalls: 0,
+    referralBonus: 0
+  };
+
+  if (plan && PLANS[plan]) {
+    const p = PLANS[plan];
+    newUser.planMinutes = p.minutes;
+    newUser.planName = plan;
+    newUser.planExpires = Date.now() + p.days * 86400000;
+  }
+
+  users.push(newUser);
+  saveUsers(users);
+
+  // Email skipped if fails (keep original logic)
+  try { await sendEmail(email, "Account Created", { email, pin, balance: newUser.balance, planName: newUser.planName || "Wallet Only", planMinutes: newUser.planMinutes, planExpires: newUser.planExpires, message: "Your calling account is ready.", referralCode: newUser.referralCode }); }
+  catch (err) { console.error(err.message); }
+
+  res.json({
+    message: "User created",
+    pin,
+    balance: newUser.balance,
+    plan: newUser.planName,
+    planMinutes: newUser.planMinutes,
+    planExpires: newUser.planExpires ? new Date(newUser.planExpires) : null,
+    referralCode: newUser.referralCode,
+    phone: newUser.phone
+  });
+});
+
+// Admin top-up
+app.post('/admin/topup', async (req, res) => {
+  const { key, email, amount } = req.body;
+  if (key !== process.env.ADMIN_KEY) return res.status(403).json({ error: "Unauthorized" });
+
+  const users = getUsers();
+  const user = users.find(u => u.email === email);
+  if (!user) return res.status(404).json({ error: "User not found" });
+
+  const topupAmount = parseFloat(amount) || 0;
+  user.balance += topupAmount;
+  if (user.email !== "uchendugoodluck067@gmail.com" && user.balance > 10000) user.balance = 10000;
+
+  saveUsers(users);
+
+  try { await sendEmail(user.email, "Wallet Top-up", { email: user.email, balance: user.balance, planName: user.planName || "Wallet Only", planMinutes: user.planMinutes, planExpires: user.planExpires, message: `Your account has been topped up by $${topupAmount.toFixed(2)}. Current balance: $${user.balance.toFixed(2)}.` }); }
+  catch (err) { console.error(err.message); }
+
+  res.json({ message: "Top-up successful", balance: user.balance });
+});
+
+// Admin activate plan
+app.post('/admin/activate-plan', async (req, res) => {
+  const { key, email, plan } = req.body;
+  if (key !== process.env.ADMIN_KEY) return res.status(403).json({ error: "Unauthorized" });
+
+  const users = getUsers();
+  const user = users.find(u => u.email === email);
+  if (!user) return res.status(404).json({ error: "User not found" });
+
+  if (!PLANS[plan]) return res.status(400).json({ error: "Invalid plan" });
+
+  const p = PLANS[plan];
+  user.planMinutes = p.minutes;
+  user.planName = plan;
+  user.planExpires = Date.now() + p.days * 86400000;
+
+  saveUsers(users);
+
+  try { await sendEmail(user.email, "Plan Activated", { email: user.email, planName: user.planName, planMinutes: user.planMinutes, planExpires: user.planExpires, message: `Your plan ${plan} is now active and expires in ${p.days} day(s).` }); }
+  catch (err) { console.error(err.message); }
+
+  res.json({ message: "Plan activated", plan: user.planName, minutes: user.planMinutes, expires: new Date(user.planExpires) });
+});
+
+// ✅ New endpoint to check users.json in real-time
+app.get('/admin/users', (req, res) => {
+  res.json(getUsers());
+});
 
 // =================== HEALTH CHECK ===================
 app.get('/', (req, res) => res.send('Teld Server Running 🚀'));
