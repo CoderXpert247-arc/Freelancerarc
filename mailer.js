@@ -14,12 +14,8 @@ if (!process.env.SENDGRID_API_KEY) {
 function formatValue(val, fallback = "0") {
   if (val === undefined || val === null || val === "") return fallback;
 
-  // If number → keep two decimals
   if (typeof val === 'number') return val.toFixed(2);
-
-  // Date → convert to readable string
   if (val instanceof Date) return val.toLocaleString();
-
   if (typeof val === 'string') return val;
 
   return fallback;
@@ -36,16 +32,17 @@ function loadTemplate(data = {}, templateFile = 'emailTemplates.html') {
 
     let html = fs.readFileSync(templatePath, 'utf8');
 
-    // Ensure telecom account fields exist
+    // Map server.js user fields → template placeholders
     data = {
       ...data,
       pin: formatValue(data.pin, "Not set"),
       balance: formatValue(data.balance, "0.00"),
-      plans: data.planName || "None",
+      plans: data.planName || "None",                     // matches {{plans}} in template
       planMinutes: data.planMinutes != null ? data.planMinutes : "Not active",
       planExpires: data.planExpires ? new Date(data.planExpires).toLocaleString() : "Not active",
       referralBonus: formatValue(data.referralBonus),
       totalCalls: formatValue(data.totalCalls),
+      message: data.message || ""
     };
 
     // OTP array → otp1…otp6
@@ -56,12 +53,12 @@ function loadTemplate(data = {}, templateFile = 'emailTemplates.html') {
       delete data.otp;
     }
 
-    // Replace placeholders in template
+    // Replace placeholders
     Object.keys(data).forEach(key => {
       html = html.replace(new RegExp(`{{${key}}}`, 'g'), data[key]);
     });
 
-    // Clean any unreplaced tags → fallback to "Not available"
+    // Clean any unreplaced tags → fallback
     html = html.replace(/{{.*?}}/g, "Not available");
 
     return html;
@@ -83,7 +80,7 @@ async function sendEmail(to, subject, templateData = {}, templateFile = 'emailTe
       to,
       from: process.env.EMAIL_FROM,
       subject,
-      html,
+      html
     };
 
     console.log("📧 Sending email:", subject, "→", to);
@@ -102,7 +99,7 @@ async function sendEmail(to, subject, templateData = {}, templateFile = 'emailTe
   }
 }
 
-// ===== Test Email =====
+// ===== Test Email Function =====
 async function sendTestEmail() {
   try {
     const otpArray = ['1','2','3','4','5','6'];
@@ -134,6 +131,6 @@ async function sendTestEmail() {
   }
 }
 
-// ===== Export functions =====
+// ===== Export =====
 module.exports = sendEmail;
 module.exports.sendTestEmail = sendTestEmail;
