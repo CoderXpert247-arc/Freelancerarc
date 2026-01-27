@@ -1,128 +1,169 @@
 <!DOCTYPE html>
 <html>
 <head>
-  <meta charset="UTF-8">
-  <title>{{title}}</title>
-  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>{{title}}</title>
 
-  <style>
-    /* Reset & basic */
-    body, table, td, a { -webkit-text-size-adjust: 100%; -ms-text-size-adjust: 100%; }
-    table, td { mso-table-lspace:0pt; mso-table-rspace:0pt; }
-    img { -ms-interpolation-mode:bicubic; border:0; height:auto; line-height:100%; outline:none; text-decoration:none; display:block; }
-    body { margin:0; padding:0; width:100% !important; background-color:#F5F7FB; font-family: Helvetica, Arial, sans-serif; }
-    a { text-decoration:none; color:inherit; }
+<style>
+body { margin:0; padding:0; background:#F5F7FB; font-family: Helvetica, Arial, sans-serif; }
+table { border-collapse:collapse; }
+img { border:0; display:block; }
 
-    /* Button fallback for Gmail */
-    .button {
-      display:inline-block;
-      background-color:#0052FF;
-      color:#ffffff;
-      padding:16px 32px;
-      border-radius:8px;
-      font-weight:bold;
-      font-size:16px;
-      text-align:center;
-    }
+.status-table td{
+  padding:4px 0;
+  font-size:14px;
+  color:#000;
+  line-height:1.6;
+  word-break:break-word;
+}
 
-    /* Responsive */
-    @media screen and (max-width:480px) {
-      .logo-text { font-size:36px !important; }
-      .greeting h2 { font-size:20px !important; }
-      .greeting p { font-size:14px !important; }
-      .card-padding { padding:24px 16px !important; }
-    }
-  </style>
+.value {
+  display:block;
+  margin-top:2px;
+  font-weight:normal;
+  color:#222;
+  white-space:pre-wrap;
+  word-wrap:break-word;
+}
+
+@media screen and (max-width:480px){
+  .container { width:100% !important; }
+  .text-pad { padding:20px !important; }
+  .h2 { font-size:20px !important; }
+  .p { font-size:14px !important; }
+}
+</style>
 </head>
+
 <body>
 
-<!-- Outer container -->
-<table border="0" cellpadding="0" cellspacing="0" width="100%" bgcolor="#F5F7FB">
-  <tr>
-    <td align="center" style="padding:20px 0;">
+<table width="100%" bgcolor="#F5F7FB" cellpadding="0" cellspacing="0">
+<tr>
+<td align="center">
 
-      <!-- Inner container -->
-      <table border="0" cellpadding="0" cellspacing="0" width="600" style="background:#ffffff; border-radius:12px; box-shadow:0 4px 12px rgba(0,0,0,0.05); padding:32px 24px;" class="card-padding">
+<table width="600" class="container" bgcolor="#ffffff" cellpadding="0" cellspacing="0" style="border-radius:12px; box-shadow:0 4px 12px rgba(0,0,0,0.05);">
 
-        <!-- Logo -->
-        <tr>
-          <td align="left" style="padding-bottom:24px;">
-            <table border="0" cellpadding="0" cellspacing="0" style="background:#0052FF; border-radius:14px; padding:16px 26px;">
-              <tr>
-                <td valign="middle">
-                  <!-- SVG -->
-                  <svg width="60" height="60" viewBox="0 0 120 80" xmlns="http://www.w3.org/2000/svg" style="display:block;">
-                    <g fill="none" stroke="#FFFFFF" stroke-width="8" stroke-linecap="round" stroke-linejoin="round">
-                      <path d="M5 60 L30 20 L55 60 L80 35 L105 60"/>
-                      <path d="M20 50 Q45 25 70 50" stroke-width="5"/>
-                    </g>
-                  </svg>
-                </td>
-                <td valign="middle" style="padding-left:14px;">
-                  <span style="color:#ffffff; font-size:48px; font-family:'Arial', sans-serif; letter-spacing:0.5px;">teld</span>
-                </td>
-              </tr>
-            </table>
-          </td>
-        </tr>
+<tr>
+<td height="10" style="line-height:10px; font-size:0;">&nbsp;</td>
+</tr>
 
-        <!-- Greeting -->
-        <tr>
-          <td class="greeting" style="padding-bottom:32px;">
-            <h2 style="font-size:24px; font-weight:700; color:#384860; margin:0;">{{title}}</h2>
-            <p style="font-size:16px; color:#121A26; line-height:1.6; margin:12px 0 0 0;">Hello <b>{{email}}</b>,<br><br>{{message}}</p>
-          </td>
-        </tr>
+<tr>
+<td align="left" style="padding:10px 0 0 18px;">
+  <img src="https://i.ibb.co/cc3hBQ3d/1000005520-removebg-preview.png" width="150" alt="Teld Logo">
+</td>
+</tr>
 
-        <!-- Account info -->
-        <tr>
-          <td style="font-size:14px; color:#000; line-height:1.6; padding-bottom:32px;">
-            <div><b>Access PIN:</b> {{pin}}</div>
-            <div><b>Wallet Balance:</b> ${{balance}}</div>
-            <div><b>Plan Name:</b> {{planName}}</div>
-            <div><b>Plan Minutes Remaining:</b> {{planMinutes}}</div>
-            <div><b>Plan Expiration:</b> {{planExpires}}</div>
-            <div><b>Referral Bonus:</b> ${{referralBonus}}</div>
-            <div><b>Total Calls Made:</b> {{totalCalls}}</div>
-          </td>
-        </tr>
+<tr>
+<td style="padding:24px 32px;" class="text-pad">
+  <h2 class="h2" style="margin:0; font-size:24px; color:#384860;">{{title}}</h2>
+  <p class="p" style="margin:12px 0 0 0; font-size:16px; color:#121A26; line-height:1.6;">
+    Hello <b>{{email}}</b>,<br><br>{{message}}
+  </p>
+</td>
+</tr>
 
-        <!-- Button -->
-        <tr>
-          <td align="center" style="padding-bottom:32px;">
-            <a href="#" class="button">Account Updates</a>
-          </td>
-        </tr>
+<!-- 🔥 ACCOUNT STATUS SECTION -->
+<tr>
+<td style="padding:0 32px 24px 32px;" class="text-pad">
+  <table width="100%" class="status-table">
 
-        <!-- Social icons -->
-        <tr>
-          <td align="right" style="padding-bottom:16px;">
-            <table border="0" cellpadding="0" cellspacing="0">
-              <tr>
-                <td style="padding-left:8px;"><a href="#"><img src="https://i.imgur.com/1bX5QH6.png" width="24" height="24" alt="FB"></a></td>
-                <td style="padding-left:8px;"><a href="#"><img src="https://i.imgur.com/9TX3bVf.png" width="24" height="24" alt="IG"></a></td>
-                <td style="padding-left:8px;"><a href="#"><img src="https://i.imgur.com/ObJgRkK.png" width="24" height="24" alt="WA"></a></td>
-              </tr>
-            </table>
-          </td>
-        </tr>
+    <tr>
+      <td><b>Access PIN</b>
+        <span class="value">{{pin || 0}}</span>
+      </td>
+    </tr>
 
-        <!-- Footer -->
-        <tr>
-          <td style="font-size:14px; color:#999; line-height:1.6; text-align:center; padding-top:16px;">
-            This email was sent to <b>{{email}}</b>. Replies are not monitored. If you did not expect this email, you may safely ignore it.<br><br>
-            © 2026 Teld Communications, 5b Fawole Street #200, Lagos, Ojo 90017-6410, Nigeria
-            <br><br>
-            <small style="color:#666; line-height:1.4;">
-              ⚠️ Please keep your Access PIN confidential. We cannot issue refunds for lost balances.
-              Any unauthorized use due to sharing or disclosure of your PIN is the account holder's responsibility.
-            </small>
-          </td>
-        </tr>
+    <tr>
+      <td><b>Wallet Balance</b>
+        <span class="value">${{balance || 0}}</span>
+      </td>
+    </tr>
 
-      </table>
-    </td>
-  </tr>
+    <tr>
+      <td><b>Active Plans</b>
+        <span class="value">{{plans || "None"}}</span>
+      </td>
+    </tr>
+
+    <tr>
+      <td><b>Plan Minutes Remaining</b>
+        <span class="value">{{planMinutes || 0}}</span>
+      </td>
+    </tr>
+
+    <tr>
+      <td><b>Plan Expirations</b>
+        <span class="value">{{planExpires || "Not active"}}</span>
+      </td>
+    </tr>
+
+    <tr>
+      <td><b>Referral Bonus</b>
+        <span class="value">{{referralBonus || 0}}</span>
+      </td>
+    </tr>
+
+    <tr>
+      <td><b>Total Calls Made</b>
+        <span class="value">{{totalCalls || 0}}</span>
+      </td>
+    </tr>
+
+  </table>
+</td>
+</tr>
+
+<tr>
+<td align="center" style="padding:10px 32px 30px 32px;">
+  <a href="#"
+     style="background:#0052FF;
+            color:#ffffff;
+            text-decoration:none;
+            padding:14px 0;
+            border-radius:8px;
+            font-weight:bold;
+            display:block;
+            width:100%;
+            max-width:100%;
+            box-sizing:border-box;">
+    Account Updates
+  </a>
+</td>
+</tr>
+
+<tr>
+<td align="center" style="padding-bottom:20px;">
+  <table cellpadding="0" cellspacing="0">
+    <tr>
+      <td style="padding:0 6px;">
+        <a href="#"><img src="https://i.ibb.co/cXbZPxx4/sm-icons-facebook-logo.png" width="24"></a>
+      </td>
+      <td style="padding:0 6px;">
+        <a href="#"><img src="https://i.ibb.co/PsBTgQtD/every-social-media-logo-and-icon-in-one-handy-place-instagram-app-logo.png" width="24"></a>
+      </td>
+      <td style="padding:0 6px;">
+        <a href="#"><img src="https://i.ibb.co/q3YcZybJ/sm-icons-youtube.png" width="24"></a>
+      </td>
+    </tr>
+  </table>
+</td>
+</tr>
+
+<tr>
+<td style="padding:20px 32px 32px 32px; font-size:13px; color:#888; text-align:center; line-height:1.6;" class="text-pad">
+  This email was sent to <b>{{email}}</b>.<br>
+  © 2026 Teld Communications — Lagos, Nigeria<br><br>
+  <small style="color:#666;">
+    ⚠️ Keep your Access PIN confidential. Unauthorized use is the account holder's responsibility.
+  </small>
+</td>
+</tr>
+
+</table>
+
+</td>
+</tr>
 </table>
 
 </body>
