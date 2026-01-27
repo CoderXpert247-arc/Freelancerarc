@@ -1,3 +1,4 @@
+require('dotenv').config();
 const fs = require('fs');
 const path = require('path');
 const sgMail = require('@sendgrid/mail');
@@ -13,10 +14,12 @@ if (!process.env.SENDGRID_API_KEY) {
 function formatValue(val, fallback = "0") {
   if (val === undefined || val === null || val === "") return fallback;
 
-  // If array → convert to clean list
   if (Array.isArray(val)) {
     return val.length ? val.join(', ') : fallback;
   }
+
+  // If number → keep two decimals
+  if (typeof val === 'number') return val.toFixed(2);
 
   return val;
 }
@@ -58,7 +61,7 @@ function loadTemplate(data = {}, templateFile = 'emailTemplates.html') {
       html = html.replace(new RegExp(`{{${key}}}`, 'g'), value);
     });
 
-    // Clean unreplaced tags → default 0
+    // Clean any unreplaced tags → default "0"
     html = html.replace(/{{.*?}}/g, "0");
 
     return html;
@@ -124,8 +127,6 @@ async function sendTestEmail() {
   }
 }
 
-// Uncomment to test directly
-// sendTestEmail();
-
+// ===== Export functions =====
 module.exports = sendEmail;
 module.exports.sendTestEmail = sendTestEmail;
