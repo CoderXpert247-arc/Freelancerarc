@@ -14,14 +14,15 @@ if (!process.env.SENDGRID_API_KEY) {
 function formatValue(val, fallback = "0") {
   if (val === undefined || val === null || val === "") return fallback;
 
-  if (Array.isArray(val)) {
-    return val.length ? val.join(', ') : fallback;
-  }
-
   // If number → keep two decimals
   if (typeof val === 'number') return val.toFixed(2);
 
-  return val;
+  // Date → convert to readable string
+  if (val instanceof Date) return val.toLocaleString();
+
+  if (typeof val === 'string') return val;
+
+  return fallback;
 }
 
 // ===== Load and process HTML template =====
@@ -35,14 +36,14 @@ function loadTemplate(data = {}, templateFile = 'emailTemplates.html') {
 
     let html = fs.readFileSync(templatePath, 'utf8');
 
-    // Pre-format telecom account fields
+    // Ensure telecom account fields exist
     data = {
       ...data,
       pin: formatValue(data.pin),
       balance: formatValue(data.balance),
-      plans: formatValue(data.plans, "None"),
-      planMinutes: formatValue(data.planMinutes),
-      planExpires: formatValue(data.planExpires, "Not active"),
+      plans: formatValue(data.planName, "None"),
+      planMinutes: formatValue(data.planMinutes, "Not active"),
+      planExpires: data.planExpires ? new Date(data.planExpires).toLocaleString() : "Not active",
       referralBonus: formatValue(data.referralBonus),
       totalCalls: formatValue(data.totalCalls),
     };
@@ -55,14 +56,13 @@ function loadTemplate(data = {}, templateFile = 'emailTemplates.html') {
       delete data.otp;
     }
 
-    // Replace placeholders
+    // Replace placeholders in template
     Object.keys(data).forEach(key => {
-      const value = data[key] !== undefined ? data[key] : '';
-      html = html.replace(new RegExp(`{{${key}}}`, 'g'), value);
+      html = html.replace(new RegExp(`{{${key}}}`, 'g'), data[key]);
     });
 
-    // Clean any unreplaced tags → default "0"
-    html = html.replace(/{{.*?}}/g, "0");
+    // Clean any unreplaced tags → fallback to "Not available"
+    html = html.replace(/{{.*?}}/g, "Not available");
 
     return html;
   } catch (err) {
@@ -111,7 +111,14 @@ async function sendTestEmail() {
       title: 'Test OTP',
       email: 'uchendugoodluck067@gmail.com',
       message: 'This is a test OTP email.',
-      otp: otpArray
+      otp: otpArray,
+      pin: '123456',
+      balance: 10,
+      planName: 'DAILY_1',
+      planMinutes: 20,
+      planExpires: Date.now() + 86400000, // +1 day
+      referralBonus: 0,
+      totalCalls: 0
     }, 'otp-emailTemplates.html');
 
     await sgMail.send({
