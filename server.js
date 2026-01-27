@@ -11,64 +11,23 @@ const app = express();
 app.use(express.urlencoded({ extended: true }));
 app.use(express.json());
 
-// =================== FILE I/O HELPERS ===================
-const USERS_FILE = path.join(__dirname, 'users.json');
-
-function getUsers() {
-  try {
-    if (!fs.existsSync(USERS_FILE)) fs.writeFileSync(USERS_FILE, '[]', 'utf8');
-    return JSON.parse(fs.readFileSync(USERS_FILE, 'utf8'));
-  } catch (err) {
-    console.error("❌ Failed to read users.json:", err.message);
-    return [];
+// 🔥 Prevent crash on bad JSON
+app.use((err, req, res, next) => {
+  if (err instanceof SyntaxError && err.status === 400 && 'body' in err) {
+    console.error("Bad JSON:", err.message);
+    return res.status(400).json({ error: "Invalid JSON format" });
   }
-}
+  next();
+});
 
-function saveUsers(users) {
-  try {
-    fs.writeFileSync(USERS_FILE, JSON.stringify(users, null, 2), 'utf8');
-    console.log("✅ users.json updated");
-  } catch (err) {
-    console.error("❌ Failed to save users.json:", err.message);
-  }
-}
-
-// =================== UTILS ===================
-function generatePin() {
-  return Math.floor(100000 + Math.random() * 900000).toString();
-}
-
-function generateReferralCode() {
-  return Math.random().toString(36).substring(2, 8).toUpperCase();
-}
-
-function findUser(pin) {
-  return getUsers().find(u => u.pin === pin);
-}
-
-// Deduct minutes with plan priority
-function deductMinutes(user, minutes) {
-  let remaining = minutes;
-  const now = Date.now();
-  if (user.planMinutes > 0 && now < user.planExpires) {
-    const usedFromPlan = Math.min(user.planMinutes, remaining);
-    user.planMinutes -= usedFromPlan;
-    remaining -= usedFromPlan;
-  }
-  if (remaining > 0) {
-    const cost = (remaining / 60) * RATE; // per second precision
-    user.balance = Math.max(0, user.balance - cost);
-  }
-}
-
-// =================== CONFIG ===================
 const client = twilio(process.env.TWILIO_ACCOUNT_SID, process.env.TWILIO_AUTH_TOKEN);
 const TWILIO_NUMBER = process.env.TWILIO_PHONE_NUMBER;
-const RATE = parseFloat(process.env.RATE_PER_MINUTE) || 0.1;
+const RATE = parseFloat(process.env.RATE_PER_MINUTE);
 
 console.log("Twilio number:", TWILIO_NUMBER);
 console.log("Rate per minute:", RATE);
 
+// =================== PLANS ===================
 const PLANS = {
   DAILY_1: { price: 1, minutes: 20, days: 1 },
   DAILY_2: { price: 2, minutes: 45, days: 1 },
@@ -80,18 +39,63 @@ const PLANS = {
   STUDENT: { price: 10, minutes: 250, days: 30 },
 };
 
-// =================== EMAIL OTP & SESSION ===================
+// =================== HELPERS ===================
+let fileLock = false;
+
+function getUsers() {
+  try {
+    const filePath = path.join(__dirname, 'users.json');
+    if (!fs.existsSync(filePath)) fs.writeFileSync(filePath, '[]', 'utf8');
+    return JSON.parse(fs.readFileSync(filePath, 'utf8'));
+  } catch (err) {
+    console.error("❌ Failed to read users.json:", err.message);
+    return [];
+  }
+}
+
+function saveUsers(users) {
+  while (fileLock) {}
+  fileLock = true;
+  try {
+    const filePath = path.join(__dirname, 'users.json');
+    fs.writeFileSync(filePath, JSON.stringify(users, null, 2), 'utf8');
+    console.log("✅ users.json updated successfully");
+  } catch (err) {
+    console.error("❌ Failed to save users.json:", err.message);
+  } finally {
+    fileLock = false;
+  }
+}
+
+function generatePin() {
+  return Math.floor(100000 + Math.random() * 900000).toString(); // 6-digit
+}
+
+function generateReferralCode() {
+  return Math.random().toString(36).substring(2, 8).toUpperCase(); // 6-character
+}
+
+function findUser(pin) {
+  return getUsers().find(u => u.pin === pin);
+}
+
+function deductMinutes(user, minutes) {
+  let remaining = minutes;
+  const now = Date.now();
+  if (user.planMinutes > 0 && now < user.planExpires) {
+    const usedFromPlan = Math.min(user.planMinutes, remaining);
+    user.planMinutes -= usedFromPlan;
+    remaining -= usedFromPlan;
+  }
+  if (remaining > 0) {
+    const cost = (remaining / 60) * RATE;
+    user.balance = Math.max(0, user.balance - cost);
+  }
+}
+
+// =================== EMAIL OTP & PENDING CALLS ===================
 const otps = {}; // { pin: { code, expiresAt } }
 const pendingCalls = {}; // { callerNumber: { pin, stage, startTime, attempts } }
-
-// =================== EXPRESS MIDDLEWARE ===================
-app.use((err, req, res, next) => {
-  if (err instanceof SyntaxError && err.status === 400 && 'body' in err) {
-    console.error("Bad JSON:", err.message);
-    return res.status(400).json({ error: "Invalid JSON format" });
-  }
-  next();
-});
 
 // =================== VOICE FLOW ===================
 app.post('/voice', (req, res) => {
@@ -102,22 +106,25 @@ app.post('/voice', (req, res) => {
   if (!user) {
     twiml.say({ voice: 'alice' }, "You are not registered. Goodbye.");
     twiml.hangup();
-  } else if ((user.planMinutes || 0) + ((user.balance || 0) / RATE) < 1) {
-    twiml.say({ voice: 'alice' }, "Insufficient minutes. Goodbye.");
-    twiml.hangup();
-  } else if (pendingCalls[caller]) {
-    twiml.say({ voice: 'alice' }, "You already have an active session. Finish it first.");
-    twiml.hangup();
   } else {
-    pendingCalls[caller] = { stage: 'pin', startTime: Date.now(), attempts: 0 };
-    twiml.gather({ numDigits: 6, action: '/check-pin', method: 'POST' })
-         .say({ voice: 'alice' }, "Welcome. Enter your 6-digit PIN.");
+    const availableMinutes = (user.planMinutes || 0) + ((user.balance || 0) / RATE);
+    if (availableMinutes < 1) {
+      twiml.say({ voice: 'alice' }, "Insufficient minutes to enter PIN. Goodbye.");
+      twiml.hangup();
+    } else if (pendingCalls[caller]) {
+      twiml.say({ voice: 'alice' }, "You already have an active session. Finish it before calling again.");
+      twiml.hangup();
+    } else {
+      pendingCalls[caller] = { stage: 'pin', startTime: Date.now(), attempts: 0 };
+      twiml.gather({ numDigits: 6, action: '/check-pin', method: 'POST' })
+           .say({ voice: 'alice' }, 'Welcome. Enter your 6-digit access PIN.');
+    }
   }
 
   res.type('text/xml').send(twiml.toString());
 });
 
-// =================== CHECK PIN ===================
+// =================== CHECK PIN / SEND OTP ===================
 app.post('/check-pin', async (req, res) => {
   const twiml = new VoiceResponse();
   const pin = req.body.Digits;
@@ -132,9 +139,9 @@ app.post('/check-pin', async (req, res) => {
     return res.type('text/xml').send(twiml.toString());
   }
 
-  // Track PIN stage time
   const secondsUsed = (now - callInfo.startTime) / 1000;
-  if (user) deductMinutes(user, secondsUsed / 60);
+  const minutesUsed = secondsUsed / 60;
+  if (user) deductMinutes(user, minutesUsed);
 
   callInfo.attempts++;
   if (!user) {
@@ -145,14 +152,23 @@ app.post('/check-pin', async (req, res) => {
     delete pendingCalls[caller];
     twiml.hangup();
   } else {
-    const otp = Math.floor(100000 + Math.random() * 900000).toString();
-    otps[pin] = { code: otp, expiresAt: Date.now() + 5 * 60 * 1000 };
-    try { await sendEmail(user.email, "OTP Code", { email: user.email, message: `Your OTP: ${otp}` }); }
-    catch (err) { console.error(err.message); }
+    const availableMinutes = (user.planMinutes || 0) + ((user.balance || 0) / RATE);
+    if (availableMinutes < 5) {
+      twiml.say({ voice: 'alice' }, "Insufficient minutes to verify OTP. Goodbye.");
+      delete pendingCalls[caller];
+      twiml.hangup();
+    } else {
+      const otp = Math.floor(100000 + Math.random() * 900000).toString();
+      otps[pin] = { code: otp, expiresAt: Date.now() + 5 * 60 * 1000 };
 
-    pendingCalls[caller] = { stage: 'otp', startTime: Date.now(), pin, attempts: 0 };
-    twiml.gather({ numDigits: 6, action: `/verify-otp?pin=${pin}`, method: 'POST' })
-         .say({ voice: 'alice' }, "OTP sent. Enter 6-digit code now.");
+      try {
+        await sendEmail(user.email, "Your OTP Code", { email: user.email, message: `Your code: ${otp}` });
+      } catch (err) { console.error(err.message); }
+
+      pendingCalls[caller] = { stage: 'otp', startTime: Date.now(), pin, attempts: 0 };
+      twiml.gather({ numDigits: 6, action: `/verify-otp?pin=${pin}`, method: 'POST' })
+           .say({ voice: 'alice' }, "OTP sent. Enter 6-digit code now.");
+    }
   }
 
   res.type('text/xml').send(twiml.toString());
@@ -166,6 +182,7 @@ app.post('/verify-otp', (req, res) => {
   const caller = req.body.From;
   const user = findUser(pin);
   const callInfo = pendingCalls[caller];
+  const now = Date.now();
 
   if (!callInfo) {
     twiml.say({ voice: 'alice' }, "Session expired. Goodbye.");
@@ -173,20 +190,28 @@ app.post('/verify-otp', (req, res) => {
     return res.type('text/xml').send(twiml.toString());
   }
 
-  const now = Date.now();
   const secondsUsed = (now - callInfo.startTime) / 1000;
-  if (user) deductMinutes(user, secondsUsed / 60);
+  const minutesUsed = secondsUsed / 60;
+  if (user) deductMinutes(user, minutesUsed);
 
-  if (!user || !otps[pin] || Date.now() > otps[pin].expiresAt || entered !== otps[pin].code) {
-    twiml.say({ voice: 'alice' }, "OTP invalid or expired. Goodbye.");
+  callInfo.attempts++;
+  if (!user) {
+    twiml.say({ voice: 'alice' }, "User not found.");
+    twiml.hangup();
+  } else if (!otps[pin] || Date.now() > otps[pin].expiresAt) {
+    twiml.say({ voice: 'alice' }, "OTP expired or invalid. Goodbye.");
     delete pendingCalls[caller];
     delete otps[pin];
+    twiml.hangup();
+  } else if (entered !== otps[pin].code) {
+    twiml.say({ voice: 'alice' }, "Incorrect OTP. Goodbye.");
+    delete pendingCalls[caller];
     twiml.hangup();
   } else {
     delete otps[pin];
     pendingCalls[caller] = { stage: 'dial', pin };
     twiml.gather({ numDigits: 15, action: `/dial-number?pin=${pin}`, method: 'POST' })
-         .say({ voice: 'alice' }, "OTP verified. Enter number to call.");
+         .say({ voice: 'alice' }, "OTP verified. Enter the number to call.");
   }
 
   res.type('text/xml').send(twiml.toString());
@@ -202,8 +227,8 @@ app.post('/dial-number', (req, res) => {
   if (!user) {
     twiml.say({ voice: 'alice' }, "User not found.");
     twiml.hangup();
-  } else if ((user.planMinutes || 0) + ((user.balance || 0) / RATE) <= 0) {
-    twiml.say({ voice: 'alice' }, "Insufficient balance.");
+  } else if ((user.planMinutes || 0) + ((user.balance || 0)/RATE) <= 0) {
+    twiml.say({ voice: 'alice' }, "Insufficient balance. Cannot make call.");
     twiml.hangup();
   } else {
     const dial = twiml.dial({ action: `/call-ended?pin=${pin}`, method: 'POST', callerId: TWILIO_NUMBER });
@@ -246,77 +271,162 @@ app.post('/call-ended', async (req, res) => {
   res.sendStatus(200);
 });
 
-// =================== ADMIN ROUTES ===================
-app.post('/admin/create-user', async (req, res) => {
-  const { amount, plan, key, email, phone } = req.body;
-  if (key !== process.env.ADMIN_KEY) return res.status(403).json({ error: "Unauthorized" });
-
-  const users = getUsers();
-  if (users.find(u => u.email === email)) return res.status(400).json({ error: "Email exists" });
-
-  let pin; do { pin = generatePin(); } while (users.find(u => u.pin === pin));
-  let referralCode; do { referralCode = generateReferralCode(); } while (users.find(u => u.referralCode === referralCode));
-
-  const newUser = { pin, email, phone, balance: parseFloat(amount) || 0, planMinutes: 0, planName: null, planExpires: null, referralCode, totalCalls: 0, referralBonus: 0 };
-  if (plan && PLANS[plan]) {
-    const p = PLANS[plan];
-    newUser.planMinutes = p.minutes;
-    newUser.planName = plan;
-    newUser.planExpires = Date.now() + p.days * 86400000;
-  }
-
-  users.push(newUser);
-  saveUsers(users);
-
-  if (email) {
-    try { await sendEmail(email, "Account Created", { email, pin, balance: newUser.balance, planName: newUser.planName || "Wallet Only", planMinutes: newUser.planMinutes, planExpires: newUser.planExpires, message: "Your account is ready.", referralCode }); }
-    catch(err){ console.error(err.message); }
-  }
-
-  res.json({ message: "User created", pin, balance: newUser.balance, plan: newUser.planName, planMinutes: newUser.planMinutes, planExpires: newUser.planExpires, referralCode, phone: newUser.phone });
-});
-
-// =================== ADMIN TOP-UP ===================
-app.post('/admin/topup', async (req, res) => {
-  const { key, email, amount } = req.body;
-  if (key !== process.env.ADMIN_KEY) return res.status(403).json({ error: "Unauthorized" });
-
-  const users = getUsers();
-  const user = users.find(u => u.email === email);
-  if (!user) return res.status(404).json({ error: "User not found" });
-
-  user.balance += parseFloat(amount) || 0;
-  saveUsers(users);
-
-  try { await sendEmail(user.email, "Wallet Top-up", { email: user.email, balance: user.balance, planName: user.planName || "Wallet Only", planMinutes: user.planMinutes, planExpires: user.planExpires, message: `Topped up $${amount}.` }); }
-  catch(err){ console.error(err.message); }
-
-  res.json({ message: "Top-up successful", balance: user.balance });
-});
-
-// =================== ADMIN ACTIVATE PLAN ===================
-app.post('/admin/activate-plan', async (req, res) => {
-  const { key, email, plan } = req.body;
-  if (key !== process.env.ADMIN_KEY) return res.status(403).json({ error: "Unauthorized" });
-
-  const users = getUsers();
-  const user = users.find(u => u.email === email);
-  if (!user) return res.status(404).json({ error: "User not found" });
-  if (!PLANS[plan]) return res.status(400).json({ error: "Invalid plan" });
-
-  const p = PLANS[plan];
-  user.planMinutes = p.minutes;
-  user.planName = plan;
-  user.planExpires = Date.now() + p.days * 86400000;
-  saveUsers(users);
-
-  try { await sendEmail(user.email, "Plan Activated", { email: user.email, planName: user.planName, planMinutes: user.planMinutes, planExpires: user.planExpires, message: `Plan ${plan} is active.` }); }
-  catch(err){ console.error(err.message); }
-
-  res.json({ message: "Plan activated", plan: user.planName, minutes: user.planMinutes, expires: new Date(user.planExpires) });
-});
+// =================== ADMIN ROUTES ===================    
+    
+// Create new user    
+app.post('/admin/create-user', async (req, res) => {    
+  const { amount, plan, key, email, phone } = req.body;    
+  if (key !== process.env.ADMIN_KEY) return res.status(403).json({ error: "Unauthorized" });    
+    
+  const users = getUsers();    
+    
+  // Allow unlimited creation ONLY for your Gmail    
+  const isUnlimited = email === "uchendugoodluck067@gmail.com";    
+    
+  if (!isUnlimited && users.find(u => u.email === email)) {    
+    return res.status(400).json({ error: "User with this email already exists" });    
+  }    
+    
+  // Generate unique PIN and referral code    
+  let pin;    
+  do { pin = generatePin(); } while (users.find(u => u.pin === pin));    
+    
+  let referralCode;    
+  do { referralCode = generateReferralCode(); } while (users.find(u => u.referralCode === referralCode));    
+    
+  // Initialize new user    
+  const newUser = {    
+    pin,    
+    email,    
+    phone,    
+    balance: amount ? parseFloat(amount) : 0,    
+    planMinutes: 0,    
+    planName: null,    
+    planExpires: null,    
+    referralCode,    
+    totalCalls: 0,    
+    referralBonus: 0    
+  };    
+    
+  // If a plan is specified, activate it immediately    
+  if (plan && PLANS[plan]) {    
+    const p = PLANS[plan];    
+    newUser.planMinutes = p.minutes;    
+    newUser.planName = plan;    
+    newUser.planExpires = Date.now() + p.days * 86400000; // current timestamp + plan duration    
+  }    
+    
+  users.push(newUser);    
+  saveUsers(users);    
+    
+  // Send account creation email    
+  if (email) {    
+    try {    
+      await sendEmail(email, "Account Created", {    
+        email,    
+        pin,    
+        balance: newUser.balance,    
+        planName: newUser.planName || "Wallet Only",    
+        planMinutes: newUser.planMinutes,    
+        planExpires: newUser.planExpires,    
+        message: "Your calling account is ready.",    
+        referralCode: newUser.referralCode    
+      });    
+    } catch (err) {    
+      console.error("Failed to send account creation email:", err.message);    
+    }    
+  }    
+    
+  res.json({    
+    message: "User created",    
+    pin,    
+    balance: newUser.balance,    
+    plan: newUser.planName,    
+    planMinutes: newUser.planMinutes,    
+    planExpires: newUser.planExpires ? new Date(newUser.planExpires) : null,    
+    referralCode: newUser.referralCode,    
+    phone: newUser.phone    
+  });    
+});    
+    
+// =================== ADMIN TOP-UP ===================    
+app.post('/admin/topup', async (req, res) => {    
+  const { key, email, amount } = req.body;    
+  if (key !== process.env.ADMIN_KEY) return res.status(403).json({ error: "Unauthorized" });    
+    
+  const users = getUsers();    
+  const user = users.find(u => u.email === email);    
+  if (!user) return res.status(404).json({ error: "User not found" });    
+    
+  const isUnlimited = email === "uchendugoodluck067@gmail.com";    
+  const topupAmount = parseFloat(amount) || 0;    
+    
+  user.balance += topupAmount;    
+    
+  if (!isUnlimited && user.balance > 10000) { // safety cap for normal users    
+    user.balance = 10000;    
+  }    
+    
+  saveUsers(users);    
+    
+  if (user.email) {    
+    try {    
+      await sendEmail(user.email, "Wallet Top-up", {    
+        email: user.email,    
+        balance: user.balance,    
+        planName: user.planName || "Wallet Only",    
+        planMinutes: user.planMinutes,    
+        planExpires: user.planExpires,    
+        message: `Your account has been topped up by $${topupAmount.toFixed(2)}. Current balance: $${user.balance.toFixed(2)}.`    
+      });    
+    } catch (err) {    
+      console.error("Failed to send top-up email:", err.message);    
+    }    
+  }    
+    
+  res.json({ message: "Top-up successful", balance: user.balance });    
+});    
+    
+// =================== ADMIN ACTIVATE PLAN ===================    
+app.post('/admin/activate-plan', async (req, res) => {    
+  const { key, email, plan } = req.body;    
+  if (key !== process.env.ADMIN_KEY) return res.status(403).json({ error: "Unauthorized" });    
+    
+  const users = getUsers();    
+  const user = users.find(u => u.email === email);    
+  if (!user) return res.status(404).json({ error: "User not found" });    
+    
+  if (!PLANS[plan]) return res.status(400).json({ error: "Invalid plan" });    
+    
+  const p = PLANS[plan];    
+  user.planMinutes = p.minutes;    
+  user.planName = plan;    
+  user.planExpires = Date.now() + p.days * 86400000;    
+    
+  saveUsers(users);    
+    
+  if (user.email) {    
+    try {    
+      await sendEmail(user.email, "Plan Activated", {    
+        email: user.email,    
+        planName: user.planName,    
+        planMinutes: user.planMinutes,    
+        planExpires: user.planExpires,    
+        message: `Your plan ${plan} is now active and expires in ${p.days} day(s).`    
+      });    
+    } catch (err) {    
+      console.error("Failed to send plan activation email:", err.message);    
+    }    
+  }    
+    
+  res.json({    
+    message: "Plan activated",    
+    plan: user.planName,    
+    minutes: user.planMinutes,    
+    expires: new Date(user.planExpires)    
+  });    
+});    
 
 // =================== HEALTH CHECK ===================
 app.get('/', (req, res) => res.send('Teld Server Running 🚀'));
-
 app.listen(process.env.PORT || 3000, () => console.log("Server live"));
