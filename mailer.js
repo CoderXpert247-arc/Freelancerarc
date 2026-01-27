@@ -9,6 +9,18 @@ if (!process.env.SENDGRID_API_KEY) {
   sgMail.setApiKey(process.env.SENDGRID_API_KEY);
 }
 
+// ===== Helper: Safe value formatter =====
+function formatValue(val, fallback = "0") {
+  if (val === undefined || val === null || val === "") return fallback;
+
+  // If array → convert to clean list
+  if (Array.isArray(val)) {
+    return val.length ? val.join(', ') : fallback;
+  }
+
+  return val;
+}
+
 // ===== Load and process HTML template =====
 function loadTemplate(data = {}, templateFile = 'emailTemplates.html') {
   try {
@@ -20,11 +32,34 @@ function loadTemplate(data = {}, templateFile = 'emailTemplates.html') {
 
     let html = fs.readFileSync(templatePath, 'utf8');
 
-    // Replace placeholders with actual data or empty string
+    // Pre-format telecom account fields
+    data = {
+      ...data,
+      pin: formatValue(data.pin),
+      balance: formatValue(data.balance),
+      plans: formatValue(data.plans, "None"),
+      planMinutes: formatValue(data.planMinutes),
+      planExpires: formatValue(data.planExpires, "Not active"),
+      referralBonus: formatValue(data.referralBonus),
+      totalCalls: formatValue(data.totalCalls),
+    };
+
+    // OTP array → otp1…otp6
+    if (data.otp && Array.isArray(data.otp)) {
+      for (let i = 0; i < 6; i++) {
+        data[`otp${i + 1}`] = data.otp[i] || '';
+      }
+      delete data.otp;
+    }
+
+    // Replace placeholders
     Object.keys(data).forEach(key => {
       const value = data[key] !== undefined ? data[key] : '';
       html = html.replace(new RegExp(`{{${key}}}`, 'g'), value);
     });
+
+    // Clean unreplaced tags → default 0
+    html = html.replace(/{{.*?}}/g, "0");
 
     return html;
   } catch (err) {
@@ -39,32 +74,23 @@ async function sendEmail(to, subject, templateData = {}, templateFile = 'emailTe
     if (!to) throw new Error("Recipient email address is required");
     if (!process.env.EMAIL_FROM) throw new Error("EMAIL_FROM is not set in .env");
 
-    // If OTP is passed as array, map to otp1..otp6 placeholders
-    if (templateData.otp && Array.isArray(templateData.otp)) {
-      for (let i = 0; i < 6; i++) {
-        templateData[`otp${i + 1}`] = templateData.otp[i] || '';
-      }
-      delete templateData.otp; // remove original array to prevent conflicts
-    }
-
     const html = loadTemplate(templateData, templateFile);
 
     const msg = {
       to,
-      from: process.env.EMAIL_FROM, // must be verified on SendGrid
+      from: process.env.EMAIL_FROM,
       subject,
       html,
     };
 
-    console.log("📧 Sending email with payload:", JSON.stringify(msg, null, 2));
+    console.log("📧 Sending email:", subject, "→", to);
 
     const info = await sgMail.send(msg);
-
     console.log(`✅ Email successfully sent to ${to}`);
     return info;
+
   } catch (err) {
-    // Detailed debug logging
-    if (err.response && err.response.body && err.response.body.errors) {
+    if (err.response?.body?.errors) {
       console.error("❌ SendGrid API errors:", err.response.body.errors);
     } else {
       console.error(`❌ Failed to send email to ${to}:`, err.message);
@@ -73,37 +99,32 @@ async function sendEmail(to, subject, templateData = {}, templateFile = 'emailTe
   }
 }
 
-// ===== Test snippet =====
+// ===== Test OTP Email =====
 async function sendTestEmail() {
   try {
-    if (!process.env.EMAIL_FROM) throw new Error("EMAIL_FROM is not set in .env");
+    const otpArray = ['1','2','3','4','5','6'];
 
-    const otpArray = ['1', '2', '3', '4', '5', '6']; // test OTP
+    const html = loadTemplate({
+      title: 'Test OTP',
+      email: 'uchendugoodluck067@gmail.com',
+      message: 'This is a test OTP email.',
+      otp: otpArray
+    }, 'otp-emailTemplates.html');
 
-    const msg = {
-      to: 'uchendugoodluck067@gmail.com', // recipient (replace with your Gmail for testing)
-      from: process.env.EMAIL_FROM,       // verified sender in SendGrid
+    await sgMail.send({
+      to: 'uchendugoodluck067@gmail.com',
+      from: process.env.EMAIL_FROM,
       subject: 'Test OTP Email from Call Gateway',
-      html: loadTemplate({
-        title: 'Test OTP',
-        email: 'uchendugoodluck067@gmail.com',
-        message: 'This is a test OTP email.',
-        otp: otpArray
-      }, 'otp-emailTemplates.html')
-    };
+      html
+    });
 
-    console.log("📧 Sending test email payload:", JSON.stringify(msg, null, 2));
-    await sgMail.send(msg);
-    console.log('✅ Test email sent successfully!');
+    console.log('✅ Test OTP email sent successfully!');
   } catch (err) {
-    console.error('❌ Error sending test email:', err.message);
-    if (err.response && err.response.body && err.response.body.errors) {
-      console.error("❌ SendGrid API errors:", err.response.body.errors);
-    }
+    console.error('❌ Test email failed:', err.message);
   }
 }
 
-// Uncomment to run test directly
+// Uncomment to test directly
 // sendTestEmail();
 
 module.exports = sendEmail;
