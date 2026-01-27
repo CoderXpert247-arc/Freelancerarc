@@ -247,15 +247,16 @@ app.post('/call-ended', async (req, res) => {
     saveUsers(users);
 
     try {
-      await sendEmail(user.email, "Call Summary", {
-        email: user.email,
-        message: `You used ${minutesUsed.toFixed(2)} minutes.`,
-        balance: user.balance.toFixed(2),
-        minutes: user.planMinutes.toFixed(2),
-        plan: user.planName || "None",
-        referralCode: user.referralCode
-      });
-    } catch (err) { console.error(err.message); }
+  await sendEmail(user.email, "Call Summary", {
+    title: "Call Summary",
+    email: user.email,
+    message: `You used ${minutesUsed.toFixed(2)} minutes.`,
+    balance: user.balance.toFixed(2),
+    planName: user.planName,
+    planMinutes: user.planMinutes,
+    referralCode: user.referralCode
+  });
+} catch (err) { console.error(err.message); }
   }
 
   Object.keys(pendingCalls).forEach(k => {
@@ -306,8 +307,21 @@ app.post('/admin/create-user', async (req, res) => {
   saveUsers(users);
 
   // Email skipped if fails (keep original logic)
-  try { await sendEmail(email, "Account Created", { email, pin, balance: newUser.balance, planName: newUser.planName || "Wallet Only", planMinutes: newUser.planMinutes, planExpires: newUser.planExpires, message: "Your calling account is ready.", referralCode: newUser.referralCode }); }
-  catch (err) { console.error(err.message); }
+  try {
+  await sendEmail(email, "Account Created", {
+    title: "Account Created",
+    email,
+    pin,
+    balance: newUser.balance.toFixed(2),
+    planName: newUser.planName || "Wallet Only",
+    planMinutes: newUser.planMinutes,
+    planExpires: newUser.planExpires,
+    referralCode: newUser.referralCode,
+    referralBonus: newUser.referralBonus,
+    totalCalls: newUser.totalCalls,
+    message: "Your calling account is ready. Let's reshape the bounds of telecommunication"
+  });
+} catch (err) { console.error(err.message); }
 
   res.json({
     message: "User created",
@@ -336,8 +350,17 @@ app.post('/admin/topup', async (req, res) => {
 
   saveUsers(users);
 
-  try { await sendEmail(user.email, "Wallet Top-up", { email: user.email, balance: user.balance, planName: user.planName || "Wallet Only", planMinutes: user.planMinutes, planExpires: user.planExpires, message: `Your account has been topped up by $${topupAmount.toFixed(2)}. Current balance: $${user.balance.toFixed(2)}.` }); }
-  catch (err) { console.error(err.message); }
+  try {
+  await sendEmail(user.email, "Wallet Top-up", {
+    title: "Wallet Top-up",
+    email: user.email,
+    balance: user.balance.toFixed(2),
+    planName: user.planName || "Wallet Only",
+    planMinutes: user.planMinutes,
+    planExpires: user.planExpires,
+    message: `Your account has been topped up by $${topupAmount.toFixed(2)}. Current balance: $${user.balance.toFixed(2)}.`
+  });
+} catch (err) { console.error(err.message); }
 
   res.json({ message: "Top-up successful", balance: user.balance });
 });
@@ -360,8 +383,16 @@ app.post('/admin/activate-plan', async (req, res) => {
 
   saveUsers(users);
 
-  try { await sendEmail(user.email, "Plan Activated", { email: user.email, planName: user.planName, planMinutes: user.planMinutes, planExpires: user.planExpires, message: `Your plan ${plan} is now active and expires in ${p.days} day(s).` }); }
-  catch (err) { console.error(err.message); }
+  try {
+  await sendEmail(user.email, "Plan Activated", {
+    title: "Plan Activated",
+    email: user.email,
+    planName: user.planName,
+    planMinutes: user.planMinutes,
+    planExpires: user.planExpires,
+    message: `Your plan ${plan} is now active and expires in ${PLANS[plan].days} day(s).`
+  });
+} catch (err) { console.error(err.message); }
 
   res.json({ message: "Plan activated", plan: user.planName, minutes: user.planMinutes, expires: new Date(user.planExpires) });
 });
