@@ -7,8 +7,8 @@
 
 <style>
 body { margin:0; padding:0; background:#F5F7FB; font-family: Helvetica, Arial, sans-serif; }
-table { border-collapse:collapse; }
-img { border:0; display:block; }
+table { border-collapse:collapse; }  
+img { border:0; display:block; }  
 
 .status-table td{
   padding:4px 0;
@@ -70,43 +70,43 @@ img { border:0; display:block; }
 
     <tr>
       <td><b>Access PIN</b>
-        <span class="value">{{pin || 0}}</span>
+        <span class="value">{{pin}}</span>
       </td>
     </tr>
 
     <tr>
       <td><b>Wallet Balance</b>
-        <span class="value">${{balance || 0}}</span>
+        <span class="value">${{balance}}</span>
       </td>
     </tr>
 
     <tr>
       <td><b>Active Plans</b>
-        <span class="value">{{plans || "None"}}</span>
+        <span class="value">{{plans}}</span>
       </td>
     </tr>
 
     <tr>
       <td><b>Plan Minutes Remaining</b>
-        <span class="value">{{planMinutes || 0}}</span>
+        <span class="value">{{planMinutes}}</span>
       </td>
     </tr>
 
     <tr>
       <td><b>Plan Expirations</b>
-        <span class="value">{{planExpires || "Not active"}}</span>
+        <span class="value">{{planExpires}}</span>
       </td>
     </tr>
 
     <tr>
       <td><b>Referral Bonus</b>
-        <span class="value">{{referralBonus || 0}}</span>
+        <span class="value">{{referralBonus}}</span>
       </td>
     </tr>
 
     <tr>
       <td><b>Total Calls Made</b>
-        <span class="value">{{totalCalls || 0}}</span>
+        <span class="value">{{totalCalls}}</span>
       </td>
     </tr>
 
