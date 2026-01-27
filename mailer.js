@@ -24,7 +24,8 @@ function formatValue(val, fallback = "0") {
 // ===== Load and process HTML template =====
 function loadTemplate(data = {}, templateFile = 'emailTemplates.html') {
   try {
-    const templatePath = path.join(__dirname, '..', 'templates', templateFile);
+    // ✅ Use absolute path from project root to avoid Render path issues
+    const templatePath = path.join(process.cwd(), 'templates', templateFile);
 
     if (!fs.existsSync(templatePath)) {
       throw new Error(`Email template not found at ${templatePath}`);
