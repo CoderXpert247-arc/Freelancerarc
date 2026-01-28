@@ -77,11 +77,19 @@ function generatePin() {
 function generateReferralCode() {
   return Math.random().toString(36).substring(2, 8).toUpperCase();
 }
-const PLANS = {
-  basic: { minutes: 60, days: 7 },
-  standard: { minutes: 180, days: 30 },
-  premium: { minutes: 500, days: 90 }
-};
+
+// =================== PLANS ===================  
+const PLANS = {  
+  DAILY_1: { price: 1, minutes: 20, days: 1 },  
+  DAILY_2: { price: 2, minutes: 45, days: 1 },  
+  WEEKLY_5: { price: 5, minutes: 110, days: 7 },  
+  WEEKLY_10: { price: 10, minutes: 240, days: 7 },  
+  MONTHLY_20: { price: 20, minutes: 500, days: 30 },  
+  MONTHLY_35: { price: 35, minutes: 950, days: 30 },  
+  MONTHLY_50: { price: 50, minutes: 1500, days: 30 },  
+  STUDENT: { price: 10, minutes: 250, days: 30 },  
+};  
+  
 
 // ================= VOICE FLOW =================
 app.post('/voice', async (req, res) => {
@@ -269,32 +277,33 @@ app.post('/admin/create-user', async (req, res) => {
     referralBonus: 0
   };
 
-  if (plan && PLANS[plan]) {
-    const p = PLANS[plan];
+  // ✅ Fix: match plan keys in uppercase
+  if (plan && PLANS[plan.toUpperCase()]) {
+    const p = PLANS[plan.toUpperCase()];
     newUser.planMinutes = p.minutes;
-    newUser.planName = plan;
+    newUser.planName = plan.toUpperCase();
     newUser.planExpires = Date.now() + p.days * 86400000;
   }
 
   users.push(newUser);
   saveUsers(users);
 
-  // Email skipped if fails (keep original logic)
+  // Send email (keep original logic)
   try {
-  await sendEmail(email, "Account Created", {
-    title: "Account Created",
-    email,
-    pin,
-    balance: newUser.balance.toFixed(2),
-    planName: newUser.planName || "Wallet Only",
-    planMinutes: newUser.planMinutes,
-    planExpires: newUser.planExpires,
-    referralCode: newUser.referralCode,
-    referralBonus: newUser.referralBonus,
-    totalCalls: newUser.totalCalls,
-    message: "Your calling account is ready. Let's reshape the bounds of telecommunication"
-  });
-} catch (err) { console.error(err.message); }
+    await sendEmail(email, "Account Created", {
+      title: "Account Created",
+      email,
+      pin,
+      balance: newUser.balance.toFixed(2),
+      planName: newUser.planName || "Wallet Only",
+      planMinutes: newUser.planMinutes,
+      planExpires: newUser.planExpires,
+      referralCode: newUser.referralCode,
+      referralBonus: newUser.referralBonus,
+      totalCalls: newUser.totalCalls,
+      message: "Your calling account is ready. Let's reshape the bounds of telecommunication"
+    });
+  } catch (err) { console.error(err.message); }
 
   res.json({
     message: "User created",
