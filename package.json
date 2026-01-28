@@ -1,7 +1,7 @@
 {
   "name": "thrill-call-system",
-  "version": "1.1.0",
-  "description": "Simple prepaid call-through system using Twilio, SendGrid and Redis session storage",
+  "version": "1.2.0",
+  "description": "Teld-Thrill prepaid call-through telecom system using Twilio, SendGrid, Redis and MongoDB",
   "main": "server.js",
   "scripts": {
     "start": "node server.js"
@@ -11,6 +11,7 @@
     "express": "^4.18.2",
     "twilio": "^4.21.0",
     "@sendgrid/mail": "^7.7.0",
-    "redis": "^4.6.13"
+    "redis": "^4.6.13",
+    "mongoose": "^8.1.0"
   }
 }
