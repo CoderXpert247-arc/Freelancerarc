@@ -134,40 +134,41 @@ async function debugEmail(to, subject, body) {
 }
 
 // ================= TWILIO VOICE FLOW =================
-app.post('/voice', twilioParser, async (req, res) => {
-  try {
-    console.log('/voice called', req.body);
-    const twiml = new VoiceResponse();
-    const caller = req.body.From;
-    const user = findUser(caller);
+app.post('/voice', twilioParser, async (req, res) => {  
+  try {  
+    console.log('/voice called', req.body);  
+    const twiml = new VoiceResponse();  
+    const caller = req.body.From;  
+    const user = findUser(caller);  
+  
+    if (!user) {  
+      twiml.say("You are not registered.");  
+      twiml.hangup();  
+    } else {  
+      await setSession(`call:${caller}`, { stage: 'pin', attempts: 0 }, 300);  
 
-    if (!user) {
-      twiml.say("You are not registered.");
-      twiml.hangup();
-    } else {
-      await setSession(`call:${caller}`, { stage: 'pin', attempts: 0 }, 300);
-
-      // 🔥 CRITICAL: let audio path stabilize (fixes first digit loss)
+      // 🔥 ADD THIS — lets audio path stabilize (fixes first digit loss)
       twiml.pause({ length: 1 });
 
-      const gather = twiml.gather({
-        numDigits: 6,
-        action: `${BASE_URL}/check-pin`,
+      twiml.gather({  
+        numDigits: 6,  
+        action: `${BASE_URL}/check-pin`,  
         method: 'POST',
-        input: 'dtmf',              // force tone input only
-        timeout: 10,                // wait before deciding input is done
-        finishOnKey: '',            // don't stop early on any key
-        actionOnEmptyResult: true   // still hit webhook if nothing captured
-      });
 
-      gather.say("Welcome. Enter your six digit PIN.");
-    }
+        // 🔥 ADD THESE — professional IVR DTMF settings
+        input: 'dtmf',
+        timeout: 10,
+        finishOnKey: '',
+        actionOnEmptyResult: true
 
-    res.type('text/xml').send(twiml.toString());
-  } catch (err) {
-    console.error('Error /voice:', err);
-    res.status(503).send('Service Unavailable');
-  }
+      }).say("Welcome. Enter your six digit PIN.");  
+    }  
+  
+    res.type('text/xml').send(twiml.toString());  
+  } catch (err) {  
+    console.error('Error /voice:', err);  
+    res.status(503).send('Service Unavailable');  
+  }  
 });
 
 // ================= CHECK PIN =================
@@ -180,7 +181,7 @@ app.post('/check-pin', twilioParser, async (req, res) => {
     const call = await getSession(`call:${caller}`);  
     console.log('Session data:', call);  
 
-    // 🔥 ADDED: Handle missing or short digits (DTMF clipping protection)
+    // Handle missing digits
     if (!pin || pin.length < 6) {
       twiml.say("I did not receive all six digits.");
       twiml.pause({ length: 1 });
@@ -195,37 +196,52 @@ app.post('/check-pin', twilioParser, async (req, res) => {
     }  
 
     call.attempts++;  
-    const user = findUser(pin);  
 
-    if (!user || call.attempts > 3) {  
+    // 🔥 FIX: find user by PHONE, not PIN
+    const user = findUser(caller);
+
+    if (!user || user.pin !== pin || call.attempts > 3) {  
       await deleteSession(`call:${caller}`);  
       twiml.say("Invalid PIN.");  
       twiml.hangup();  
-    } else {  
-      const otp = Math.floor(100000 + Math.random() * 900000).toString();  
-      console.log('Generated OTP:', otp);  
-      await setSession(`otp:${pin}`, { code: otp }, 300);  
-      await debugEmail(user.email, "Your OTP Code", { message: `OTP: ${otp}` });  
-      await setSession(`call:${caller}`, { stage: 'otp', pin, attempts: 0 }, 300);  
-
-      // 🔥 ADDED: Pause so OTP gather doesn't lose first digit
-      twiml.pause({ length: 1 });
-
-      twiml.gather({  
-        numDigits: 6,  
-        action: `${BASE_URL}/verify-otp?pin=${pin}`,  
-        method: 'POST',
-        input: 'dtmf',
-        timeout: 10,
-        finishOnKey: '',
-        actionOnEmptyResult: true
-      }).say("OTP sent. Enter code.");  
+      return res.type('text/xml').send(twiml.toString());
     }  
 
+    // OTP generation
+    const otp = Math.floor(100000 + Math.random() * 900000).toString();  
+    console.log('Generated OTP:', otp);  
+
+    await setSession(`otp:${caller}`, { code: otp }, 300);  
+
+    // 🔥 Only send email if exists (prevents crash)
+    if (user.email) {
+      await debugEmail(user.email, "Your OTP Code", { message: `OTP: ${otp}` });
+    } else {
+      console.log("No email on user — skipping email send");
+    }
+
+    await setSession(`call:${caller}`, { stage: 'otp', pin, attempts: 0 }, 300);  
+
+    twiml.pause({ length: 1 });
+
+    twiml.gather({  
+      numDigits: 6,  
+      action: `${BASE_URL}/verify-otp`,  
+      method: 'POST',
+      input: 'dtmf',
+      timeout: 10,
+      finishOnKey: '',
+      actionOnEmptyResult: true
+    }).say("OTP sent. Enter code.");  
+
     res.type('text/xml').send(twiml.toString());  
+
   } catch (err) {  
     console.error('Error /check-pin:', err);  
-    res.status(503).send('Service Unavailable');  
+    const twiml = new VoiceResponse();
+    twiml.say("System error. Please try again later.");
+    twiml.hangup();
+    res.type('text/xml').send(twiml.toString());  // 🔥 ALWAYS return TwiML
   }  
 });
 
