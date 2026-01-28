@@ -16,27 +16,43 @@ app.use('/admin', express.json());
 // Twilio routes use URL-encoded parser
 const twilioParser = express.urlencoded({ extended: false });
 
+// ================= DEBUG LOGGER =================
+app.use((req, res, next) => {
+  console.log('--- NEW REQUEST ---');
+  console.log('METHOD:', req.method);
+  console.log('URL:', req.originalUrl);
+  console.log('BODY:', req.body);
+  console.log('QUERY:', req.query);
+  next();
+});
+
 // ================= REDIS =================
 const redisClient = redis.createClient({ url: process.env.REDIS_URL });
-
 redisClient.on('error', (err) => console.error('Redis error:', err));
 redisClient.connect()
   .then(() => console.log("✅ Redis Connected"))
   .catch(err => console.error("Redis failed to connect:", err));
 
 async function setSession(key, data, ttl = 600) {
-  try { await redisClient.set(key, JSON.stringify(data), { EX: ttl }); }
-  catch (err) { console.error('Redis setSession error:', err); }
+  try {
+    console.log(`REDIS SET: ${key} →`, data, `TTL: ${ttl}`);
+    await redisClient.set(key, JSON.stringify(data), { EX: ttl });
+  } catch (err) { console.error('Redis setSession error:', err); }
 }
+
 async function getSession(key) {
   try {
     const data = await redisClient.get(key);
+    console.log(`REDIS GET: ${key} →`, data);
     return data ? JSON.parse(data) : null;
   } catch (err) { console.error('Redis getSession error:', err); return null; }
 }
+
 async function deleteSession(key) {
-  try { await redisClient.del(key); }
-  catch (err) { console.error('Redis deleteSession error:', err); }
+  try {
+    console.log(`REDIS DEL: ${key}`);
+    await redisClient.del(key);
+  } catch (err) { console.error('Redis deleteSession error:', err); }
 }
 
 // ================= TWILIO =================
@@ -51,34 +67,47 @@ const BASE_URL = process.env.BASE_URL || `http://localhost:${process.env.PORT ||
 const USERS_FILE = path.join(__dirname, 'users.json');
 function getUsers() {
   if (!fs.existsSync(USERS_FILE)) fs.writeFileSync(USERS_FILE, '[]');
-  return JSON.parse(fs.readFileSync(USERS_FILE));
+  const users = JSON.parse(fs.readFileSync(USERS_FILE));
+  console.log('Loaded users:', users);
+  return users;
 }
 function saveUsers(users) {
+  console.log('Saving users:', users);
   fs.writeFileSync(USERS_FILE, JSON.stringify(users, null, 2));
 }
-function findUser(pin) {
-  return getUsers().find(u => u.pin === pin);
+function findUser(pinOrPhone) {
+  const users = getUsers();
+  let user = users.find(u => u.pin === pinOrPhone || u.phone === pinOrPhone);
+  console.log(`findUser(${pinOrPhone}) →`, user);
+  return user;
 }
 function deductMinutes(user, minutes) {
   let remaining = minutes;
   const now = Date.now();
+  console.log(`Deducting ${minutes} min from user:`, user.pin);
   if (user.planMinutes > 0 && now < user.planExpires) {
     const usedFromPlan = Math.min(user.planMinutes, remaining);
     user.planMinutes -= usedFromPlan;
     remaining -= usedFromPlan;
+    console.log(`Used ${usedFromPlan} from plan, remaining minutes cost: ${remaining}`);
   }
   if (remaining > 0) {
     const cost = (remaining / 60) * RATE;
     user.balance = Math.max(0, user.balance - cost);
+    console.log(`Deducted $${cost.toFixed(2)} from balance, new balance: ${user.balance}`);
   }
 }
 
 // ================= HELPER FUNCTIONS =================
 function generatePin() {
-  return Math.floor(100000 + Math.random() * 900000).toString();
+  const pin = Math.floor(100000 + Math.random() * 900000).toString();
+  console.log('Generated PIN:', pin);
+  return pin;
 }
 function generateReferralCode() {
-  return Math.random().toString(36).substring(2, 8).toUpperCase();
+  const code = Math.random().toString(36).substring(2, 8).toUpperCase();
+  console.log('Generated referral code:', code);
+  return code;
 }
 
 // ================= PLANS =================
@@ -93,12 +122,24 @@ const PLANS = {
   STUDENT: { price: 10, minutes: 250, days: 30 },
 };
 
+// ================= DEBUG EMAIL WRAPPER =================
+async function debugEmail(to, subject, body) {
+  try {
+    console.log('Sending email →', to, subject, body);
+    await sendEmail(to, subject, body);
+    console.log('Email sent successfully');
+  } catch (err) {
+    console.error('Email error:', err);
+  }
+}
+
 // ================= TWILIO VOICE FLOW =================
 app.post('/voice', twilioParser, async (req, res) => {
   try {
+    console.log('/voice called', req.body);
     const twiml = new VoiceResponse();
     const caller = req.body.From;
-    const user = getUsers().find(u => u.phone === caller);
+    const user = findUser(caller);
 
     if (!user) {
       twiml.say("You are not registered.");
@@ -119,12 +160,15 @@ app.post('/voice', twilioParser, async (req, res) => {
   }
 });
 
+// ================= CHECK PIN =================
 app.post('/check-pin', twilioParser, async (req, res) => {
   try {
+    console.log('/check-pin called', req.body);
     const twiml = new VoiceResponse();
     const caller = req.body.From;
     const pin = req.body.Digits;
     const call = await getSession(`call:${caller}`);
+    console.log('Session data:', call);
 
     if (!call) {
       twiml.say("Session expired.");
@@ -141,8 +185,9 @@ app.post('/check-pin', twilioParser, async (req, res) => {
       twiml.hangup();
     } else {
       const otp = Math.floor(100000 + Math.random() * 900000).toString();
+      console.log('Generated OTP:', otp);
       await setSession(`otp:${pin}`, { code: otp }, 300);
-      await sendEmail(user.email, "Your OTP Code", { message: `OTP: ${otp}` });
+      await debugEmail(user.email, "Your OTP Code", { message: `OTP: ${otp}` });
       await setSession(`call:${caller}`, { stage: 'otp', pin, attempts: 0 }, 300);
 
       twiml.gather({
@@ -159,8 +204,10 @@ app.post('/check-pin', twilioParser, async (req, res) => {
   }
 });
 
+// ================= VERIFY OTP =================
 app.post('/verify-otp', twilioParser, async (req, res) => {
   try {
+    console.log('/verify-otp called', req.body, req.query);
     const twiml = new VoiceResponse();
     const caller = req.body.From;
     const pin = req.query.pin;
@@ -168,6 +215,7 @@ app.post('/verify-otp', twilioParser, async (req, res) => {
 
     const call = await getSession(`call:${caller}`);
     const otp = await getSession(`otp:${pin}`);
+    console.log('Session call:', call, 'OTP:', otp);
 
     if (!call || !otp || entered !== otp.code) {
       await deleteSession(`call:${caller}`);
@@ -192,8 +240,10 @@ app.post('/verify-otp', twilioParser, async (req, res) => {
   }
 });
 
+// ================= DIAL =================
 app.post('/dial-number', twilioParser, async (req, res) => {
   try {
+    console.log('/dial-number called', req.body, req.query);
     const twiml = new VoiceResponse();
     const number = req.body.Digits;
     const pin = req.query.pin;
@@ -203,6 +253,7 @@ app.post('/dial-number', twilioParser, async (req, res) => {
       twiml.say("User not found.");
       twiml.hangup();
     } else {
+      console.log(`Dialing number ${number} for user ${user.pin}`);
       const dial = twiml.dial({
         action: `${BASE_URL}/call-ended?pin=${pin}`,
         method: 'POST',
@@ -218,8 +269,10 @@ app.post('/dial-number', twilioParser, async (req, res) => {
   }
 });
 
+// ================= CALL ENDED =================
 app.post('/call-ended', twilioParser, async (req, res) => {
   try {
+    console.log('/call-ended called', req.body, req.query);
     const duration = parseInt(req.body.DialCallDuration || 0);
     const minutesUsed = duration / 60;
     const pin = req.query.pin;
@@ -232,9 +285,11 @@ app.post('/call-ended', twilioParser, async (req, res) => {
       user.totalCalls = (user.totalCalls || 0) + minutesUsed;
       saveUsers(users);
 
-      await sendEmail(user.email, "Call Summary", {
+      await debugEmail(user.email, "Call Summary", {
         message: `Used ${minutesUsed.toFixed(2)} minutes.`
       });
+    } else {
+      console.log('User not found for call-ended');
     }
 
     res.sendStatus(200);
