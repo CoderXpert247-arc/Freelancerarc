@@ -9,8 +9,12 @@ const redis = require('redis');
 const { twiml: { VoiceResponse } } = twilio;
 const app = express();
 
-app.use(express.urlencoded({ extended: true }));
-app.use(express.json());
+// ================= MIDDLEWARE =================
+// Admin API JSON parser
+app.use('/admin', express.json());
+
+// Twilio routes use URL-encoded parser
+const twilioParser = express.urlencoded({ extended: false });
 
 // ================= REDIS =================
 const redisClient = redis.createClient({ url: process.env.REDIS_URL });
@@ -45,7 +49,6 @@ const BASE_URL = process.env.BASE_URL || `http://localhost:${process.env.PORT ||
 
 // ================= USERS FILE =================
 const USERS_FILE = path.join(__dirname, 'users.json');
-
 function getUsers() {
   if (!fs.existsSync(USERS_FILE)) fs.writeFileSync(USERS_FILE, '[]');
   return JSON.parse(fs.readFileSync(USERS_FILE));
@@ -78,21 +81,20 @@ function generateReferralCode() {
   return Math.random().toString(36).substring(2, 8).toUpperCase();
 }
 
-// =================== PLANS ===================  
-const PLANS = {  
-  DAILY_1: { price: 1, minutes: 20, days: 1 },  
-  DAILY_2: { price: 2, minutes: 45, days: 1 },  
-  WEEKLY_5: { price: 5, minutes: 110, days: 7 },  
-  WEEKLY_10: { price: 10, minutes: 240, days: 7 },  
-  MONTHLY_20: { price: 20, minutes: 500, days: 30 },  
-  MONTHLY_35: { price: 35, minutes: 950, days: 30 },  
-  MONTHLY_50: { price: 50, minutes: 1500, days: 30 },  
-  STUDENT: { price: 10, minutes: 250, days: 30 },  
-};  
-  
+// ================= PLANS =================
+const PLANS = {
+  DAILY_1: { price: 1, minutes: 20, days: 1 },
+  DAILY_2: { price: 2, minutes: 45, days: 1 },
+  WEEKLY_5: { price: 5, minutes: 110, days: 7 },
+  WEEKLY_10: { price: 10, minutes: 240, days: 7 },
+  MONTHLY_20: { price: 20, minutes: 500, days: 30 },
+  MONTHLY_35: { price: 35, minutes: 950, days: 30 },
+  MONTHLY_50: { price: 50, minutes: 1500, days: 30 },
+  STUDENT: { price: 10, minutes: 250, days: 30 },
+};
 
-// ================= VOICE FLOW =================
-app.post('/voice', async (req, res) => {
+// ================= TWILIO VOICE FLOW =================
+app.post('/voice', twilioParser, async (req, res) => {
   try {
     const twiml = new VoiceResponse();
     const caller = req.body.From;
@@ -103,7 +105,6 @@ app.post('/voice', async (req, res) => {
       twiml.hangup();
     } else {
       await setSession(`call:${caller}`, { stage: 'pin', attempts: 0 }, 300);
-
       twiml.gather({
         numDigits: 6,
         action: `${BASE_URL}/check-pin`,
@@ -118,8 +119,7 @@ app.post('/voice', async (req, res) => {
   }
 });
 
-// ================= CHECK PIN =================
-app.post('/check-pin', async (req, res) => {
+app.post('/check-pin', twilioParser, async (req, res) => {
   try {
     const twiml = new VoiceResponse();
     const caller = req.body.From;
@@ -159,8 +159,7 @@ app.post('/check-pin', async (req, res) => {
   }
 });
 
-// ================= VERIFY OTP =================
-app.post('/verify-otp', async (req, res) => {
+app.post('/verify-otp', twilioParser, async (req, res) => {
   try {
     const twiml = new VoiceResponse();
     const caller = req.body.From;
@@ -193,8 +192,7 @@ app.post('/verify-otp', async (req, res) => {
   }
 });
 
-// ================= DIAL =================
-app.post('/dial-number', async (req, res) => {
+app.post('/dial-number', twilioParser, async (req, res) => {
   try {
     const twiml = new VoiceResponse();
     const number = req.body.Digits;
@@ -220,8 +218,7 @@ app.post('/dial-number', async (req, res) => {
   }
 });
 
-// ================= CALL ENDED =================
-app.post('/call-ended', async (req, res) => {
+app.post('/call-ended', twilioParser, async (req, res) => {
   try {
     const duration = parseInt(req.body.DialCallDuration || 0);
     const minutesUsed = duration / 60;
