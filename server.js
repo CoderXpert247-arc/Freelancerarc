@@ -1,10 +1,12 @@
 require('dotenv').config();
 const express = require('express');
-const fs = require('fs');
-const path = require('path');
 const twilio = require('twilio');
-const sendEmail = require('./mailer');
 const redis = require('redis');
+const sendEmail = require('./mailer');
+
+// MongoDB connection
+const connectDB = require('./config/db'); // Your MongoDB connection
+const User = require('./model/User');    // MongoDB User model
 
 const { twiml: { VoiceResponse } } = twilio;
 const app = express();
@@ -63,47 +65,43 @@ const RATE = parseFloat(process.env.RATE_PER_MINUTE || "0");
 // ================= BASE URL =================
 const BASE_URL = process.env.BASE_URL || `http://localhost:${process.env.PORT || 3000}`;
 
-// ================= USERS FILE =================
-const USERS_FILE = path.join(__dirname, 'users.json');
-function getUsers() {
-  if (!fs.existsSync(USERS_FILE)) fs.writeFileSync(USERS_FILE, '[]');
-  const users = JSON.parse(fs.readFileSync(USERS_FILE));
-  console.log('Loaded users:', users);
-  return users;
-}
-function saveUsers(users) {
-  console.log('Saving users:', users);
-  fs.writeFileSync(USERS_FILE, JSON.stringify(users, null, 2));
-}
-function findUser(pinOrPhone) {
-  const users = getUsers();
-  let user = users.find(u => u.pin === pinOrPhone || u.phone === pinOrPhone);
+// ================= MONGO DB CONNECT =================
+connectDB(); // connect to MongoDB
+
+// ================= HELPERS =================
+async function findUser(pinOrPhone) {
+  let user = await User.findOne({ $or: [{ pin: pinOrPhone }, { phone: pinOrPhone }] });
   console.log(`findUser(${pinOrPhone}) →`, user);
   return user;
 }
-function deductMinutes(user, minutes) {
+
+async function deductMinutes(user, minutes) {
   let remaining = minutes;
   const now = Date.now();
   console.log(`Deducting ${minutes} min from user:`, user.pin);
-  if (user.planMinutes > 0 && now < user.planExpires) {
+
+  if (user.planMinutes > 0 && now < new Date(user.planExpires).getTime()) {
     const usedFromPlan = Math.min(user.planMinutes, remaining);
     user.planMinutes -= usedFromPlan;
     remaining -= usedFromPlan;
     console.log(`Used ${usedFromPlan} from plan, remaining minutes cost: ${remaining}`);
   }
+
   if (remaining > 0) {
     const cost = (remaining / 60) * RATE;
     user.balance = Math.max(0, user.balance - cost);
     console.log(`Deducted $${cost.toFixed(2)} from balance, new balance: ${user.balance}`);
   }
+
+  await user.save();
 }
 
-// ================= HELPER FUNCTIONS =================
 function generatePin() {
   const pin = Math.floor(100000 + Math.random() * 900000).toString();
   console.log('Generated PIN:', pin);
   return pin;
 }
+
 function generateReferralCode() {
   const code = Math.random().toString(36).substring(2, 8).toUpperCase();
   console.log('Generated referral code:', code);
@@ -122,9 +120,10 @@ const PLANS = {
   STUDENT: { price: 10, minutes: 250, days: 30 },
 };
 
-// ================= DEBUG EMAIL WRAPPER =================
+// ================= DEBUG EMAIL =================
 async function debugEmail(to, subject, body) {
   try {
+    if (!to) return console.log("No email provided, skipping send");
     console.log('Sending email →', to, subject, body);
     await sendEmail(to, subject, body);
     console.log('Email sent successfully');
@@ -134,54 +133,53 @@ async function debugEmail(to, subject, body) {
 }
 
 // ================= TWILIO VOICE FLOW =================
-app.post('/voice', twilioParser, async (req, res) => {  
-  try {  
-    console.log('/voice called', req.body);  
-    const twiml = new VoiceResponse();  
-    const caller = req.body.From;  
-    const user = findUser(caller);  
-  
-    if (!user) {  
-      twiml.say("You are not registered.");  
-      twiml.hangup();  
-    } else {  
-      await setSession(`call:${caller}`, { stage: 'pin', attempts: 0 }, 300);  
+app.post('/voice', twilioParser, async (req, res) => {
+  try {
+    console.log('/voice called', req.body);
+    const twiml = new VoiceResponse();
+    const caller = req.body.From;
+    const user = await findUser(caller);
 
-      // 🔥 ADD THIS — lets audio path stabilize (fixes first digit loss)
+    if (!user) {
+      twiml.say("You are not registered.");
+      twiml.hangup();
+    } else {
+      await setSession(`call:${caller}`, { stage: 'pin', attempts: 0 }, 300);
+
+      // Stabilize audio for first digit
       twiml.pause({ length: 1 });
 
-      twiml.gather({  
-        numDigits: 6,  
-        action: `${BASE_URL}/check-pin`,  
+      twiml.gather({
+        numDigits: 6,
+        action: `${BASE_URL}/check-pin`,
         method: 'POST',
-
-        // 🔥 ADD THESE — professional IVR DTMF settings
         input: 'dtmf',
         timeout: 10,
         finishOnKey: '',
         actionOnEmptyResult: true
+      }).say("Welcome. Enter your six digit PIN.");
+    }
 
-      }).say("Welcome. Enter your six digit PIN.");  
-    }  
-  
-    res.type('text/xml').send(twiml.toString());  
-  } catch (err) {  
-    console.error('Error /voice:', err);  
-    res.status(503).send('Service Unavailable');  
-  }  
+    res.type('text/xml').send(twiml.toString());
+  } catch (err) {
+    console.error('Error /voice:', err);
+    const twiml = new VoiceResponse();
+    twiml.say("System error. Please try again later.");
+    twiml.hangup();
+    res.type('text/xml').send(twiml.toString());
+  }
 });
 
 // ================= CHECK PIN =================
-app.post('/check-pin', twilioParser, async (req, res) => {  
-  try {  
-    console.log('/check-pin called', req.body);  
-    const twiml = new VoiceResponse();  
-    const caller = req.body.From;  
-    const pin = req.body.Digits;  
-    const call = await getSession(`call:${caller}`);  
-    console.log('Session data:', call);  
+app.post('/check-pin', twilioParser, async (req, res) => {
+  try {
+    console.log('/check-pin called', req.body);
+    const twiml = new VoiceResponse();
+    const caller = req.body.From;
+    const pin = req.body.Digits;
+    const call = await getSession(`call:${caller}`);
+    console.log('Session data:', call);
 
-    // Handle missing digits
     if (!pin || pin.length < 6) {
       twiml.say("I did not receive all six digits.");
       twiml.pause({ length: 1 });
@@ -189,60 +187,51 @@ app.post('/check-pin', twilioParser, async (req, res) => {
       return res.type('text/xml').send(twiml.toString());
     }
 
-    if (!call) {  
-      twiml.say("Session expired.");  
-      twiml.hangup();  
-      return res.type('text/xml').send(twiml.toString());  
-    }  
-
-    call.attempts++;  
-
-    // 🔥 FIX: find user by PHONE, not PIN
-    const user = findUser(caller);
-
-    if (!user || user.pin !== pin || call.attempts > 3) {  
-      await deleteSession(`call:${caller}`);  
-      twiml.say("Invalid PIN.");  
-      twiml.hangup();  
+    if (!call) {
+      twiml.say("Session expired.");
+      twiml.hangup();
       return res.type('text/xml').send(twiml.toString());
-    }  
-
-    // OTP generation
-    const otp = Math.floor(100000 + Math.random() * 900000).toString();  
-    console.log('Generated OTP:', otp);  
-
-    await setSession(`otp:${caller}`, { code: otp }, 300);  
-
-    // 🔥 Only send email if exists (prevents crash)
-    if (user.email) {
-      await debugEmail(user.email, "Your OTP Code", { message: `OTP: ${otp}` });
-    } else {
-      console.log("No email on user — skipping email send");
     }
 
-    await setSession(`call:${caller}`, { stage: 'otp', pin, attempts: 0 }, 300);  
+    call.attempts++;
 
+    const user = await findUser(caller); // verify by caller number
+
+    if (!user || user.pin !== pin || call.attempts > 3) {
+      await deleteSession(`call:${caller}`);
+      twiml.say("Invalid PIN.");
+      twiml.hangup();
+      return res.type('text/xml').send(twiml.toString());
+    }
+
+    // Generate OTP
+    const otp = Math.floor(100000 + Math.random() * 900000).toString();
+    console.log('Generated OTP:', otp);
+    await setSession(`otp:${caller}`, { code: otp }, 300);
+
+    if (user.email) await debugEmail(user.email, "Your OTP Code", { message: `OTP: ${otp}` });
+
+    await setSession(`call:${caller}`, { stage: 'otp', pin, attempts: 0 }, 300);
     twiml.pause({ length: 1 });
-
-    twiml.gather({  
-      numDigits: 6,  
-      action: `${BASE_URL}/verify-otp`,  
+    twiml.gather({
+      numDigits: 6,
+      action: `${BASE_URL}/verify-otp`,
       method: 'POST',
       input: 'dtmf',
       timeout: 10,
       finishOnKey: '',
       actionOnEmptyResult: true
-    }).say("OTP sent. Enter code.");  
+    }).say("OTP sent. Enter code.");
 
-    res.type('text/xml').send(twiml.toString());  
+    res.type('text/xml').send(twiml.toString());
 
-  } catch (err) {  
-    console.error('Error /check-pin:', err);  
+  } catch (err) {
+    console.error('Error /check-pin:', err);
     const twiml = new VoiceResponse();
     twiml.say("System error. Please try again later.");
     twiml.hangup();
-    res.type('text/xml').send(twiml.toString());  // 🔥 ALWAYS return TwiML
-  }  
+    res.type('text/xml').send(twiml.toString());
+  }
 });
 
 // ================= VERIFY OTP =================
@@ -255,16 +244,16 @@ app.post('/verify-otp', twilioParser, async (req, res) => {
     const entered = req.body.Digits;
 
     const call = await getSession(`call:${caller}`);
-    const otp = await getSession(`otp:${pin}`);
+    const otp = await getSession(`otp:${caller}`);
     console.log('Session call:', call, 'OTP:', otp);
 
     if (!call || !otp || entered !== otp.code) {
       await deleteSession(`call:${caller}`);
-      await deleteSession(`otp:${pin}`);
+      await deleteSession(`otp:${caller}`);
       twiml.say("OTP failed.");
       twiml.hangup();
     } else {
-      await deleteSession(`otp:${pin}`);
+      await deleteSession(`otp:${caller}`);
       await setSession(`call:${caller}`, { stage: 'dial', pin }, 600);
 
       twiml.gather({
@@ -275,9 +264,13 @@ app.post('/verify-otp', twilioParser, async (req, res) => {
     }
 
     res.type('text/xml').send(twiml.toString());
+
   } catch (err) {
     console.error('Error /verify-otp:', err);
-    res.status(503).send('Service Unavailable');
+    const twiml = new VoiceResponse();
+    twiml.say("System error. Please try again later.");
+    twiml.hangup();
+    res.type('text/xml').send(twiml.toString());
   }
 });
 
@@ -288,7 +281,7 @@ app.post('/dial-number', twilioParser, async (req, res) => {
     const twiml = new VoiceResponse();
     const number = req.body.Digits;
     const pin = req.query.pin;
-    const user = findUser(pin);
+    const user = await findUser(pin);
 
     if (!user) {
       twiml.say("User not found.");
@@ -318,13 +311,13 @@ app.post('/call-ended', twilioParser, async (req, res) => {
     const minutesUsed = duration / 60;
     const pin = req.query.pin;
 
-    const users = getUsers();
-    const user = users.find(u => u.pin === pin);
+    const user = await findUser(pin);
 
     if (user) {
-      deductMinutes(user, minutesUsed);
+      await deductMinutes(user, minutesUsed);
+
       user.totalCalls = (user.totalCalls || 0) + minutesUsed;
-      saveUsers(users);
+      await user.save();
 
       await debugEmail(user.email, "Call Summary", {
         message: `Used ${minutesUsed.toFixed(2)} minutes.`
@@ -340,143 +333,194 @@ app.post('/call-ended', twilioParser, async (req, res) => {
   }
 });
 
-// =================== ADMIN ROUTES ===================
+
+
+
+
+// =================== ADMIN ROUTES ===================  
 
 // Create new user
 app.post('/admin/create-user', async (req, res) => {
   const { amount, plan, key, email, phone } = req.body;
-  if (key !== process.env.ADMIN_KEY) return res.status(403).json({ error: "Unauthorized" });
+  if (key !== process.env.ADMIN_KEY)
+    return res.status(403).json({ error: "Unauthorized" });
 
-  const users = getUsers();
-  const isUnlimited = email === "uchendugoodluck067@gmail.com";
-
-  if (!isUnlimited && users.find(u => u.email === email)) {
-    return res.status(400).json({ error: "User with this email already exists" });
-  }
-
-  let pin; do { pin = generatePin(); } while (users.find(u => u.pin === pin));
-  let referralCode; do { referralCode = generateReferralCode(); } while (users.find(u => u.referralCode === referralCode));
-
-  const newUser = {
-    pin,
-    email,
-    phone,
-    balance: amount ? parseFloat(amount) : 0,
-    planMinutes: 0,
-    planName: null,
-    planExpires: null,
-    referralCode,
-    totalCalls: 0,
-    referralBonus: 0
-  };
-
-  // ✅ Fix: match plan keys in uppercase
-  if (plan && PLANS[plan.toUpperCase()]) {
-    const p = PLANS[plan.toUpperCase()];
-    newUser.planMinutes = p.minutes;
-    newUser.planName = plan.toUpperCase();
-    newUser.planExpires = Date.now() + p.days * 86400000;
-  }
-
-  users.push(newUser);
-  saveUsers(users);
-
-  // Send email (keep original logic)
   try {
-    await sendEmail(email, "Account Created", {
-      title: "Account Created",
-      email,
-      pin,
-      balance: newUser.balance.toFixed(2),
-      planName: newUser.planName || "Wallet Only",
-      planMinutes: newUser.planMinutes,
-      planExpires: newUser.planExpires,
-      referralCode: newUser.referralCode,
-      referralBonus: newUser.referralBonus,
-      totalCalls: newUser.totalCalls,
-      message: "Your calling account is ready. Let's reshape the bounds of telecommunication"
-    });
-  } catch (err) { console.error(err.message); }
+    // Check if user already exists
+    const existingUser = await User.findOne({ email });
+    const isUnlimited = email === "uchendugoodluck067@gmail.com";
 
-  res.json({
-    message: "User created",
-    pin,
-    balance: newUser.balance,
-    plan: newUser.planName,
-    planMinutes: newUser.planMinutes,
-    planExpires: newUser.planExpires ? new Date(newUser.planExpires) : null,
-    referralCode: newUser.referralCode,
-    phone: newUser.phone
-  });
+    if (!isUnlimited && existingUser) {
+      return res.status(400).json({ error: "User with this email already exists" });
+    }
+
+    // Generate unique PIN
+    let pin;
+    do {
+      pin = generatePin();
+    } while (await User.findOne({ pin }));
+
+    // Generate unique referral code
+    let referralCode;
+    do {
+      referralCode = generateReferralCode();
+    } while (await User.findOne({ referralCode }));
+
+    const newUser = new User({
+      pin,
+      email,
+      phone,
+      balance: amount ? parseFloat(amount) : 0,
+      planMinutes: 0,
+      planName: null,
+      planExpires: null,
+      referralCode,
+      totalCalls: 0,
+      referralBonus: 0
+    });
+
+    // Activate plan if provided
+    if (plan && PLANS[plan.toUpperCase()]) {
+      const p = PLANS[plan.toUpperCase()];
+      newUser.planMinutes = p.minutes;
+      newUser.planName = plan.toUpperCase();
+      newUser.planExpires = Date.now() + p.days * 86400000;
+    }
+
+    await newUser.save();
+
+    // Send account creation email
+    try {
+      await sendEmail(email, "Account Created", {
+        title: "Account Created",
+        email,
+        pin,
+        balance: newUser.balance.toFixed(2),
+        planName: newUser.planName || "Wallet Only",
+        planMinutes: newUser.planMinutes,
+        planExpires: newUser.planExpires,
+        referralCode: newUser.referralCode,
+        referralBonus: newUser.referralBonus,
+        totalCalls: newUser.totalCalls,
+        message: "Your calling account is ready. Let's reshape the bounds of telecommunication"
+      });
+    } catch (err) {
+      console.error("Email error:", err.message);
+    }
+
+    res.json({
+      message: "User created",
+      pin,
+      balance: newUser.balance,
+      plan: newUser.planName,
+      planMinutes: newUser.planMinutes,
+      planExpires: newUser.planExpires ? new Date(newUser.planExpires) : null,
+      referralCode: newUser.referralCode,
+      phone: newUser.phone
+    });
+
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ error: "Server error" });
+  }
 });
 
 // Admin top-up
 app.post('/admin/topup', async (req, res) => {
   const { key, email, amount } = req.body;
-  if (key !== process.env.ADMIN_KEY) return res.status(403).json({ error: "Unauthorized" });
-
-  const users = getUsers();
-  const user = users.find(u => u.email === email);
-  if (!user) return res.status(404).json({ error: "User not found" });
-
-  const topupAmount = parseFloat(amount) || 0;
-  user.balance += topupAmount;
-  if (user.email !== "uchendugoodluck067@gmail.com" && user.balance > 10000) user.balance = 10000;
-
-  saveUsers(users);
+  if (key !== process.env.ADMIN_KEY)
+    return res.status(403).json({ error: "Unauthorized" });
 
   try {
-  await sendEmail(user.email, "Wallet Top-up", {
-    title: "Wallet Top-up",
-    email: user.email,
-    balance: user.balance.toFixed(2),
-    planName: user.planName || "Wallet Only",
-    planMinutes: user.planMinutes,
-    planExpires: user.planExpires,
-    message: `Your account has been topped up by $${topupAmount.toFixed(2)}. Current balance: $${user.balance.toFixed(2)}.`
-  });
-} catch (err) { console.error(err.message); }
+    const user = await User.findOne({ email });
+    if (!user) return res.status(404).json({ error: "User not found" });
 
-  res.json({ message: "Top-up successful", balance: user.balance });
+    const topupAmount = parseFloat(amount) || 0;
+    user.balance += topupAmount;
+
+    // Cap balance for non-unlimited users
+    if (user.email !== "uchendugoodluck067@gmail.com" && user.balance > 10000)
+      user.balance = 10000;
+
+    await user.save();
+
+    // Send top-up email
+    try {
+      await sendEmail(user.email, "Wallet Top-up", {
+        title: "Wallet Top-up",
+        email: user.email,
+        balance: user.balance.toFixed(2),
+        planName: user.planName || "Wallet Only",
+        planMinutes: user.planMinutes,
+        planExpires: user.planExpires,
+        message: `Your account has been topped up by $${topupAmount.toFixed(2)}. Current balance: $${user.balance.toFixed(2)}.`
+      });
+    } catch (err) {
+      console.error("Email error:", err.message);
+    }
+
+    res.json({ message: "Top-up successful", balance: user.balance });
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ error: "Server error" });
+  }
 });
 
 // Admin activate plan
 app.post('/admin/activate-plan', async (req, res) => {
   const { key, email, plan } = req.body;
-  if (key !== process.env.ADMIN_KEY) return res.status(403).json({ error: "Unauthorized" });
-
-  const users = getUsers();
-  const user = users.find(u => u.email === email);
-  if (!user) return res.status(404).json({ error: "User not found" });
-
-  if (!PLANS[plan]) return res.status(400).json({ error: "Invalid plan" });
-
-  const p = PLANS[plan];
-  user.planMinutes = p.minutes;
-  user.planName = plan;
-  user.planExpires = Date.now() + p.days * 86400000;
-
-  saveUsers(users);
+  if (key !== process.env.ADMIN_KEY)
+    return res.status(403).json({ error: "Unauthorized" });
 
   try {
-  await sendEmail(user.email, "Plan Activated", {
-    title: "Plan Activated",
-    email: user.email,
-    planName: user.planName,
-    planMinutes: user.planMinutes,
-    planExpires: user.planExpires,
-    message: `Your plan ${plan} is now active and expires in ${PLANS[plan].days} day(s).`
-  });
-} catch (err) { console.error(err.message); }
+    const user = await User.findOne({ email });
+    if (!user) return res.status(404).json({ error: "User not found" });
 
-  res.json({ message: "Plan activated", plan: user.planName, minutes: user.planMinutes, expires: new Date(user.planExpires) });
+    if (!PLANS[plan.toUpperCase()]) return res.status(400).json({ error: "Invalid plan" });
+
+    const p = PLANS[plan.toUpperCase()];
+    user.planMinutes = p.minutes;
+    user.planName = plan.toUpperCase();
+    user.planExpires = Date.now() + p.days * 86400000;
+
+    await user.save();
+
+    // Send plan activation email
+    try {
+      await sendEmail(user.email, "Plan Activated", {
+        title: "Plan Activated",
+        email: user.email,
+        planName: user.planName,
+        planMinutes: user.planMinutes,
+        planExpires: user.planExpires,
+        message: `Your plan ${plan.toUpperCase()} is now active and expires in ${p.days} day(s).`
+      });
+    } catch (err) {
+      console.error("Email error:", err.message);
+    }
+
+    res.json({
+      message: "Plan activated",
+      plan: user.planName,
+      minutes: user.planMinutes,
+      expires: new Date(user.planExpires)
+    });
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ error: "Server error" });
+  }
 });
 
-// ✅ New endpoint to check users.json in real-time
-app.get('/admin/users', (req, res) => {
-  res.json(getUsers());
+// Get all users
+app.get('/admin/users', async (req, res) => {
+  try {
+    const users = await User.find().select('-__v'); // exclude internal Mongo fields
+    res.json(users);
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ error: "Server error" });
+  }
 });
 
 // =================== HEALTH CHECK ===================
 app.get('/', (req, res) => res.send('Teld Server Running 🚀'));
-app.listen(process.env.PORT || 3000, () => console.log("Server live"));
