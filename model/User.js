@@ -7,6 +7,14 @@ const userSchema = new mongoose.Schema({
     unique: true
   },
 
+  email: {                     // ✅ ADDED
+    type: String,
+    required: true,
+    unique: true,
+    lowercase: true,
+    trim: true
+  },
+
   pin: {
     type: String,
     required: true
@@ -17,7 +25,7 @@ const userSchema = new mongoose.Schema({
     default: 0
   },
 
-  plan: {
+  planName: {                  // ✅ RENAMED (was "plan")
     type: String,
     default: null
   },
