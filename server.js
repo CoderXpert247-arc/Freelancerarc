@@ -303,6 +303,7 @@ app.post('/dial-number', twilioParser, async (req, res) => {
   }
 });
 
+
 // ================= CALL ENDED =================
 app.post('/call-ended', twilioParser, async (req, res) => {
   try {
@@ -314,11 +315,36 @@ app.post('/call-ended', twilioParser, async (req, res) => {
     const user = await findUser(pin);
 
     if (user) {
-      await deductMinutes(user, minutesUsed);
+      let remaining = minutesUsed;
+      const now = Date.now();
 
+      // Sort plans by expiry (soonest first)
+      user.plans.sort((a, b) => new Date(a.expiresAt) - new Date(b.expiresAt));
+
+      for (let plan of user.plans) {
+        if (remaining <= 0) break;
+
+        // Only use active plans
+        if (new Date(plan.expiresAt).getTime() > now && plan.minutes > 0) {
+          const used = Math.min(plan.minutes, remaining);
+          plan.minutes -= used;
+          remaining -= used;
+          console.log(`Used ${used.toFixed(2)} min from plan ${plan.name}, remaining minutes: ${remaining.toFixed(2)}`);
+        }
+      }
+
+      // If minutes remain, deduct from balance
+      if (remaining > 0) {
+        const cost = (remaining / 60) * RATE;
+        user.balance = Math.max(0, user.balance - cost);
+        console.log(`Deducted $${cost.toFixed(2)} from balance, new balance: ${user.balance.toFixed(2)}`);
+      }
+
+      // Update total calls
       user.totalCalls = (user.totalCalls || 0) + minutesUsed;
       await user.save();
 
+      // Send call summary email
       await debugEmail(user.email, "Call Summary", {
         message: `Used ${minutesUsed.toFixed(2)} minutes.`
       });
@@ -336,10 +362,9 @@ app.post('/call-ended', twilioParser, async (req, res) => {
 
 
 
-
 // =================== ADMIN ROUTES ===================  
 
-// Create new user
+// Create new user (supports multiple plans)
 app.post('/admin/create-user', async (req, res) => {
   const { amount, plan, key, email, phone } = req.body;
   if (key !== process.env.ADMIN_KEY)
@@ -371,23 +396,30 @@ app.post('/admin/create-user', async (req, res) => {
       email,
       phone,
       balance: amount ? parseFloat(amount) : 0,
-      planMinutes: 0,
-      planName: null,
-      planExpires: null,
+      plans: [], // empty plans array initially
       referralCode,
       totalCalls: 0,
       referralBonus: 0
     });
 
-    // Activate plan if provided
+    // Activate initial plan if provided
     if (plan && PLANS[plan.toUpperCase()]) {
       const p = PLANS[plan.toUpperCase()];
-      newUser.planMinutes = p.minutes;
-      newUser.planName = plan.toUpperCase();
-      newUser.planExpires = Date.now() + p.days * 86400000;
+      const expiresAt = new Date(Date.now() + p.days * 86400000);
+
+      // Add plan to the array
+      newUser.plans.push({
+        name: plan.toUpperCase(),
+        minutes: p.minutes,
+        expiresAt,
+        purchasedAt: new Date()
+      });
     }
 
     await newUser.save();
+
+    // For backward compatibility: latest plan
+    const latestPlan = newUser.plans[newUser.plans.length - 1] || { name: null, minutes: 0, expiresAt: null };
 
     // Send account creation email
     try {
@@ -396,9 +428,9 @@ app.post('/admin/create-user', async (req, res) => {
         email,
         pin,
         balance: newUser.balance.toFixed(2),
-        planName: newUser.planName || "Wallet Only",
-        planMinutes: newUser.planMinutes,
-        planExpires: newUser.planExpires,
+        planName: latestPlan.name || "Wallet Only",
+        planMinutes: latestPlan.minutes,
+        planExpires: latestPlan.expiresAt,
         referralCode: newUser.referralCode,
         referralBonus: newUser.referralBonus,
         totalCalls: newUser.totalCalls,
@@ -412,9 +444,9 @@ app.post('/admin/create-user', async (req, res) => {
       message: "User created",
       pin,
       balance: newUser.balance,
-      plan: newUser.planName,
-      planMinutes: newUser.planMinutes,
-      planExpires: newUser.planExpires ? new Date(newUser.planExpires) : null,
+      plan: latestPlan.name,
+      planMinutes: latestPlan.minutes,
+      planExpires: latestPlan.expiresAt ? new Date(latestPlan.expiresAt) : null,
       referralCode: newUser.referralCode,
       phone: newUser.phone
     });
@@ -466,7 +498,9 @@ app.post('/admin/topup', async (req, res) => {
   }
 });
 
-// Admin activate plan
+
+
+// Admin activate plan (multi-plan support)
 app.post('/admin/activate-plan', async (req, res) => {
   const { key, email, plan } = req.body;
   if (key !== process.env.ADMIN_KEY)
@@ -476,24 +510,34 @@ app.post('/admin/activate-plan', async (req, res) => {
     const user = await User.findOne({ email });
     if (!user) return res.status(404).json({ error: "User not found" });
 
-    if (!PLANS[plan.toUpperCase()]) return res.status(400).json({ error: "Invalid plan" });
+    if (!PLANS[plan.toUpperCase()]) 
+      return res.status(400).json({ error: "Invalid plan" });
 
     const p = PLANS[plan.toUpperCase()];
-    user.planMinutes = p.minutes;
-    user.planName = plan.toUpperCase();
-    user.planExpires = Date.now() + p.days * 86400000;
+    const expiresAt = new Date(Date.now() + p.days * 86400000);
+
+    // Push new plan to the user's plans array
+    user.plans.push({
+      name: plan.toUpperCase(),
+      minutes: p.minutes,
+      expiresAt,
+      purchasedAt: new Date()
+    });
 
     await user.save();
+
+    // For backward compatibility: latest plan
+    const latestPlan = user.plans[user.plans.length - 1];
 
     // Send plan activation email
     try {
       await sendEmail(user.email, "Plan Activated", {
         title: "Plan Activated",
         email: user.email,
-        planName: user.planName,
-        planMinutes: user.planMinutes,
-        planExpires: user.planExpires,
-        message: `Your plan ${plan.toUpperCase()} is now active and expires in ${p.days} day(s).`
+        planName: latestPlan.name,
+        planMinutes: latestPlan.minutes,
+        planExpires: latestPlan.expiresAt,
+        message: `Your plan ${latestPlan.name} is now active and expires in ${p.days} day(s).`
       });
     } catch (err) {
       console.error("Email error:", err.message);
@@ -501,17 +545,18 @@ app.post('/admin/activate-plan', async (req, res) => {
 
     res.json({
       message: "Plan activated",
-      plan: user.planName,
-      minutes: user.planMinutes,
-      expires: new Date(user.planExpires)
+      plan: latestPlan.name,
+      minutes: latestPlan.minutes,
+      expires: latestPlan.expiresAt
     });
+
   } catch (err) {
     console.error(err);
     res.status(500).json({ error: "Server error" });
   }
 });
 
-// Get all users
+// Get all users (keep same)
 app.get('/admin/users', async (req, res) => {
   try {
     const users = await User.find().select('-__v'); // exclude internal Mongo fields
