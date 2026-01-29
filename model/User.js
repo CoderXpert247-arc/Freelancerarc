@@ -7,7 +7,7 @@ const userSchema = new mongoose.Schema({
     unique: true
   },
 
-  email: {                     // ✅ ADDED
+  email: {
     type: String,
     required: true,
     unique: true,
@@ -25,20 +25,30 @@ const userSchema = new mongoose.Schema({
     default: 0
   },
 
-  planName: {                  // ✅ RENAMED (was "plan")
-    type: String,
-    default: null
-  },
+  // ✅ NEW: Multiple plans instead of one
+  plans: [
+    {
+      name: {
+        type: String,
+        required: true
+      },
 
-  planMinutes: {
-    type: Number,
-    default: 0
-  },
+      minutes: {
+        type: Number,
+        required: true
+      },
 
-  planExpires: {
-    type: Date,
-    default: null
-  },
+      expiresAt: {
+        type: Date,
+        required: true
+      },
+
+      purchasedAt: {
+        type: Date,
+        default: Date.now
+      }
+    }
+  ],
 
   referralCode: {
     type: String,
