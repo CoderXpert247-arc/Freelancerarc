@@ -407,7 +407,6 @@ app.post('/admin/create-user', async (req, res) => {
       const p = PLANS[plan.toUpperCase()];
       const expiresAt = new Date(Date.now() + p.days * 86400000);
 
-      // Add plan to the array
       newUser.plans.push({
         name: plan.toUpperCase(),
         minutes: p.minutes,
@@ -418,8 +417,12 @@ app.post('/admin/create-user', async (req, res) => {
 
     await newUser.save();
 
-    // For backward compatibility: latest plan
-    const latestPlan = newUser.plans[newUser.plans.length - 1] || { name: null, minutes: 0, expiresAt: null };
+    // Latest plan for emails & response
+    const latestPlan = newUser.plans[newUser.plans.length - 1] || {
+      name: "Wallet Only",
+      minutes: 0,
+      expiresAt: null
+    };
 
     // Send account creation email
     try {
@@ -428,7 +431,7 @@ app.post('/admin/create-user', async (req, res) => {
         email,
         pin,
         balance: newUser.balance.toFixed(2),
-        planName: latestPlan.name || "Wallet Only",
+        planName: latestPlan.name,
         planMinutes: latestPlan.minutes,
         planExpires: latestPlan.expiresAt,
         referralCode: newUser.referralCode,
@@ -476,15 +479,22 @@ app.post('/admin/topup', async (req, res) => {
 
     await user.save();
 
+    // Latest plan for emails
+    const latestPlan = user.plans[user.plans.length - 1] || {
+      name: "Wallet Only",
+      minutes: 0,
+      expiresAt: null
+    };
+
     // Send top-up email
     try {
       await sendEmail(user.email, "Wallet Top-up", {
         title: "Wallet Top-up",
         email: user.email,
         balance: user.balance.toFixed(2),
-        planName: user.planName || "Wallet Only",
-        planMinutes: user.planMinutes,
-        planExpires: user.planExpires,
+        planName: latestPlan.name,
+        planMinutes: latestPlan.minutes,
+        planExpires: latestPlan.expiresAt,
         message: `Your account has been topped up by $${topupAmount.toFixed(2)}. Current balance: $${user.balance.toFixed(2)}.`
       });
     } catch (err) {
@@ -498,8 +508,6 @@ app.post('/admin/topup', async (req, res) => {
   }
 });
 
-
-
 // Admin activate plan (multi-plan support)
 app.post('/admin/activate-plan', async (req, res) => {
   const { key, email, plan } = req.body;
@@ -510,13 +518,12 @@ app.post('/admin/activate-plan', async (req, res) => {
     const user = await User.findOne({ email });
     if (!user) return res.status(404).json({ error: "User not found" });
 
-    if (!PLANS[plan.toUpperCase()]) 
+    if (!PLANS[plan.toUpperCase()])
       return res.status(400).json({ error: "Invalid plan" });
 
     const p = PLANS[plan.toUpperCase()];
     const expiresAt = new Date(Date.now() + p.days * 86400000);
 
-    // Push new plan to the user's plans array
     user.plans.push({
       name: plan.toUpperCase(),
       minutes: p.minutes,
@@ -526,10 +533,9 @@ app.post('/admin/activate-plan', async (req, res) => {
 
     await user.save();
 
-    // For backward compatibility: latest plan
+    // Latest plan for emails & response
     const latestPlan = user.plans[user.plans.length - 1];
 
-    // Send plan activation email
     try {
       await sendEmail(user.email, "Plan Activated", {
         title: "Plan Activated",
@@ -559,7 +565,7 @@ app.post('/admin/activate-plan', async (req, res) => {
 // Get all users (keep same)
 app.get('/admin/users', async (req, res) => {
   try {
-    const users = await User.find().select('-__v'); // exclude internal Mongo fields
+    const users = await User.find().select('-__v');
     res.json(users);
   } catch (err) {
     console.error(err);
@@ -570,10 +576,8 @@ app.get('/admin/users', async (req, res) => {
 // =================== HEALTH CHECK ===================  
 app.get('/', (req, res) => res.send('Teld Server Running 🚀'));
 
-
 // =================== START SERVER ===================
 const PORT = process.env.PORT || 3000;
-
 app.listen(PORT, '0.0.0.0', () => {
   console.log(`🚀 Server running on port ${PORT}`);
 });
