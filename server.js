@@ -151,7 +151,7 @@ app.post('/voice', twilioParser, async (req, res) => {
       twiml.hangup();  
     } else {  
       console.log('User found, initializing call session.');  
-      await setSession(`call:${caller}`, { stage: 'pin', attempts: 0 }, 20);  
+      await setSession(`call:${caller}`, { stage: 'pin', attempts: 0 }, 500);  
 
       // Stabilize audio for first digit  
       twiml.pause({ length: 1 });  
@@ -215,7 +215,7 @@ app.post('/check-pin', twilioParser, async (req, res) => {
     // Generate OTP  
     const otp = Math.floor(100000 + Math.random() * 900000).toString();  
     console.log('Generated OTP:', otp);  
-    await setSession(`otp:${caller}`, { code: otp }, 60); // 1 min TTL for OTP  
+    await setSession(`otp:${caller}`, { code: otp }, 600); // 1 min TTL for OTP  
 
     if (user.email) await debugEmail(user.email, "Your OTP Code", { message: `OTP: ${otp}` });  
 
