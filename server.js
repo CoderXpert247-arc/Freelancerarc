@@ -177,6 +177,7 @@ app.post('/voice', twilioParser, async (req, res) => {
   }  
 });
   
+
 // ================= CHECK PIN =================  
 app.post('/check-pin', twilioParser, async (req, res) => {  
   try {  
@@ -214,11 +215,11 @@ app.post('/check-pin', twilioParser, async (req, res) => {
     // Generate OTP  
     const otp = Math.floor(100000 + Math.random() * 900000).toString();  
     console.log('Generated OTP:', otp);  
-    await setSession(`otp:${caller}`, { code: otp }, 60); // <-- 1 min TTL for OTP  
+    await setSession(`otp:${caller}`, { code: otp }, 60); // 1 min TTL for OTP  
 
     if (user.email) await debugEmail(user.email, "Your OTP Code", { message: `OTP: ${otp}` });  
 
-    await setSession(`call:${caller}`, { stage: 'otp', pin, attempts: 0 }, 60); // <-- 1 min for entering OTP  
+    await setSession(`call:${caller}`, { stage: 'otp', pin, attempts: 0 }, 60); // 1 min for entering OTP  
 
     twiml.pause({ length: 1 });  
     twiml.gather({  
@@ -286,7 +287,8 @@ app.post('/verify-otp', twilioParser, async (req, res) => {
     twiml.hangup();  
     res.type('text/xml').send(twiml.toString());  
   }  
-});
+});  
+
 
 // ================= DIAL =================
 app.post('/dial-number', twilioParser, async (req, res) => {
@@ -310,18 +312,18 @@ app.post('/dial-number', twilioParser, async (req, res) => {
       return res.type('text/xml').send(twiml.toString());
     }
 
-    // If number is not yet provided, prompt user to enter number with 10s limit
+    // If number is not yet provided, prompt user to enter number with 1-minute limit
     if (!numberToCall) {
       console.log('No number entered yet, prompting user...');
       twiml.gather({
         numDigits: 15,           // maximum digits user can enter
         action: `${BASE_URL}/dial-number?pin=${callerPin}`, // submit back here
         method: 'POST',
-        timeout: 10,             // <-- 10 seconds to enter number
+        timeout: 60,             // <-- 1 minute to enter number now
         finishOnKey: '',         // no special key to end input
         input: 'dtmf',
         actionOnEmptyResult: true
-      }).say("Enter the number you want to call, quickly. You have ten seconds.");
+      }).say("Enter the number you want to call, quickly. You have sixty seconds.");
 
       return res.type('text/xml').send(twiml.toString());
     }
