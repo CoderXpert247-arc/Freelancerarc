@@ -347,7 +347,7 @@ app.post('/dial-number', twilioParser, async (req, res) => {
     const dial = twiml.dial({
       action: `${BASE_URL}/call-ended`, // ❌ no pin in URL
       method: 'POST',
-      callerId: TWILIO_NUMBER
+      callerId: TWILIO_PHONE_NUMBER
     });
 
     dial.number(numberToCall);
