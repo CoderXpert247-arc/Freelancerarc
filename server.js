@@ -157,7 +157,7 @@ app.post('/voice', twilioParser, async (req, res) => {
         action: `${BASE_URL}/check-pin`,  
         method: 'POST',  
         input: 'dtmf',  
-        timeout: 10,  
+        timeout: 10000,  
         finishOnKey: '',  
         actionOnEmptyResult: true  
       }).say("Welcome. Enter your six digit PIN.");  
@@ -213,7 +213,7 @@ app.post('/check-pin', twilioParser, async (req, res) => {
       action: `${BASE_URL}/verify-otp`,  
       method: 'POST',  
       input: 'dtmf',  
-      timeout: 60,  
+      timeout: 600000,  
       finishOnKey: '',  
       actionOnEmptyResult: true  
     }).say("OTP sent. Enter the code within 60 seconds.");  
@@ -257,7 +257,7 @@ app.post('/verify-otp', twilioParser, async (req, res) => {
       action: `${BASE_URL}/dial-number`,
       method: 'POST',
       input: 'dtmf',
-      timeout: 60,
+      timeout: 6000000,
       finishOnKey: '',
       actionOnEmptyResult: true
     }).say("Enter number to call within sixty seconds.");
@@ -299,7 +299,7 @@ app.post('/dial-number', twilioParser, async (req, res) => {
         numDigits: 15,
         action: `${BASE_URL}/dial-number`,
         method: 'POST',
-        timeout: 60,
+        timeout: 6000000,
         input: 'dtmf',
         finishOnKey: '',
         actionOnEmptyResult: true
