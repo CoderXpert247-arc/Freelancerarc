@@ -132,7 +132,22 @@ async function debugEmail(to, subject, body) {
   }
 }
 
-// ================= TWILIO VOICE FLOW =================
+// =================== TWILIO VOICE FLOW ===================
+const { VoiceResponse } = require('twilio').twiml;
+
+// Helper to find user with normalized phone
+async function findUser(phone) {
+  const normalized = phone.trim().replace(/[\s()-]/g, '');
+  console.log('[findUser] normalized phone:', normalized);
+  const user = await User.findOne({ phone: normalized });
+  if (user) {
+    console.log('[findUser] User found:', user.email);
+  } else {
+    console.log('[findUser] No user found for phone:', normalized);
+  }
+  return user;
+}
+
 app.post('/voice', twilioParser, async (req, res) => {
   try {
     console.log('/voice called', req.body);
@@ -140,22 +155,35 @@ app.post('/voice', twilioParser, async (req, res) => {
     const twiml = new VoiceResponse();
     let caller = req.body.From;
 
-    // Normalize phone number: remove spaces, dashes, parentheses
-    caller = caller.replace(/[\s\-\(\)]/g, '');
+    if (!caller) {
+      console.warn('[voice] No From number provided');
+      twiml.say("We could not detect your number. Goodbye.");
+      twiml.hangup();
+      return res.type('text/xml').send(twiml.toString());
+    }
 
-    // Find user using a case-insensitive match
-    const user = await User.findOne({ phone: caller });
+    // Normalize phone number: remove spaces, dashes, parentheses
+    caller = caller.trim().replace(/[\s\-\(\)]/g, '');
+    console.log('[voice] Normalized caller number:', caller);
+
+    // Find user using helper
+    const user = await findUser(caller);
 
     if (!user) {
+      console.warn('[voice] User not registered for:', caller);
       twiml.say("You are not registered.");
       twiml.hangup();
     } else {
-      // Store session
-      await setSession(`call:${caller}`, { stage: 'pin', attempts: 0 }, 300);
+      console.log('[voice] Registered user:', user.email);
 
-      // Stabilize audio for first digit
+      // Store session with stage and attempts
+      await setSession(`call:${caller}`, { stage: 'pin', attempts: 0 }, 300);
+      console.log('[voice] Session set for call:', caller);
+
+      // Stabilize audio
       twiml.pause({ length: 1 });
 
+      // Gather PIN input
       twiml.gather({
         numDigits: 6,
         action: `${BASE_URL}/check-pin`,
@@ -165,14 +193,17 @@ app.post('/voice', twilioParser, async (req, res) => {
         finishOnKey: '',
         actionOnEmptyResult: true
       }).say("Welcome. Enter your six digit PIN.");
+      console.log('[voice] Gather prompt sent for PIN input.');
     }
 
     res.type('text/xml').send(twiml.toString());
   } catch (err) {
     console.error('Error /voice:', err);
+
     const twiml = new VoiceResponse();
     twiml.say("System error. Please try again later.");
     twiml.hangup();
+
     res.type('text/xml').send(twiml.toString());
   }
 });
