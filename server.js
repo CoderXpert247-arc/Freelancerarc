@@ -174,7 +174,9 @@ app.post('/voice', twilioParser, async (req, res) => {
 });
 
 
-// ================= CHECK PIN =================  
+
+    
+      // ================= CHECK PIN =================  
 app.post('/check-pin', twilioParser, async (req, res) => {  
   try {  
     const twiml = new VoiceResponse();  
@@ -182,6 +184,7 @@ app.post('/check-pin', twilioParser, async (req, res) => {
     const pin = req.body.Digits;  
     const call = await getSession(`call:${caller}`);  
 
+    // Check if PIN was entered correctly
     if (!pin || pin.length < 6) {  
       twiml.say("I did not receive all six digits.");  
       twiml.redirect(`${BASE_URL}/voice`);  
@@ -194,6 +197,7 @@ app.post('/check-pin', twilioParser, async (req, res) => {
       return res.type('text/xml').send(twiml.toString());  
     }  
 
+    // Increment attempts
     call.attempts++;  
     const user = await findUser(caller);  
 
@@ -204,16 +208,32 @@ app.post('/check-pin', twilioParser, async (req, res) => {
       return res.type('text/xml').send(twiml.toString());  
     }  
 
+    // Generate OTP
     const otp = Math.floor(100000 + Math.random() * 900000).toString();  
     await setSession(`otp:${caller}`, { code: otp }, 600);  
     await setSession(`call:${caller}`, { stage: 'otp', pin, attempts: 0 }, 60);  
 
+    // 🔥 Send OTP via email
+    if (user.email) {
+      try {
+        await debugEmail(user.email, "Your OTP Code", {
+          message: `Your OTP code is: ${otp}. It will expire in 10 minutes.`
+        });
+        console.log(`OTP email sent to ${user.email}`);
+      } catch (emailErr) {
+        console.error("Failed to send OTP email:", emailErr);
+      }
+    } else {
+      console.warn(`No email found for user ${caller}, cannot send OTP`);
+    }
+
+    // Prompt user to enter OTP
     twiml.gather({  
       numDigits: 6,  
       action: `${BASE_URL}/verify-otp`,  
       method: 'POST',  
       input: 'dtmf',  
-      timeout: 600000,  
+      timeout: 6000,        // 60 seconds to enter OTP  
       finishOnKey: '',  
       actionOnEmptyResult: true  
     }).say("OTP sent. Enter the code within 60 seconds.");  
@@ -222,10 +242,12 @@ app.post('/check-pin', twilioParser, async (req, res) => {
 
   } catch (err) {  
     console.error('Error /check-pin:', err);  
-    res.status(503).send('Service Unavailable');  
+    const twiml = new VoiceResponse();
+    twiml.say("System error. Please try again later.");
+    twiml.hangup();
+    res.type('text/xml').send(twiml.toString());
   }  
 });
-
 
 // ================= VERIFY OTP =================
 app.post('/verify-otp', twilioParser, async (req, res) => {
