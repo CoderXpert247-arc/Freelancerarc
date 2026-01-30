@@ -151,7 +151,7 @@ app.post('/voice', twilioParser, async (req, res) => {
       twiml.hangup();  
     } else {  
       console.log('User found, initializing call session.');  
-      await setSession(`call:${caller}`, { stage: 'pin', attempts: 0 }, 300);  
+      await setSession(`call:${caller}`, { stage: 'pin', attempts: 0 }, 20);  
 
       // Stabilize audio for first digit  
       twiml.pause({ length: 1 });  
@@ -218,7 +218,7 @@ app.post('/check-pin', twilioParser, async (req, res) => {
   
     if (user.email) await debugEmail(user.email, "Your OTP Code", { message: `OTP: ${otp}` });  
   
-    await setSession(`call:${caller}`, { stage: 'otp', pin, attempts: 0 }, 300);  
+    await setSession(`call:${caller}`, { stage: 'otp', pin, attempts: 0 }, 25);  
     twiml.pause({ length: 1 });  
     twiml.gather({  
       numDigits: 6,  
