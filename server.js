@@ -281,34 +281,63 @@ app.post('/verify-otp', twilioParser, async (req, res) => {
   }  
 });  
   
-// ================= DIAL =================  
-app.post('/dial-number', twilioParser, async (req, res) => {  
-  try {  
-    console.log('/dial-number called', req.body, req.query);  
-    const twiml = new VoiceResponse();  
-    const number = req.body.Digits;  
-    const pin = req.query.pin;  
-    const user = await findUser(pin);  
-  
-    if (!user) {  
-      twiml.say("User not found.");  
-      twiml.hangup();  
-    } else {  
-      console.log(`Dialing number ${number} for user ${user.pin}`);  
-      const dial = twiml.dial({  
-        action: `${BASE_URL}/call-ended?pin=${pin}`,  
-        method: 'POST',  
-        callerId: TWILIO_NUMBER  
-      });  
-      dial.number(number);  
-    }  
-  
-    res.type('text/xml').send(twiml.toString());  
-  } catch (err) {  
-    console.error('Error /dial-number:', err);  
-    res.status(503).send('Service Unavailable');  
-  }  
-});  
+
+// ================= DIAL =================
+app.post('/dial-number', twilioParser, async (req, res) => {
+  try {
+    console.log('--- /dial-number called ---');
+    console.log('Request body:', req.body);
+    console.log('Request query:', req.query);
+
+    const twiml = new VoiceResponse();
+
+    const numberToCall = req.body.Digits; // Number entered by caller
+    const callerPin = req.query.pin;      // Caller PIN from session
+
+    // Find the caller by PIN
+    const caller = await findUser(callerPin);
+
+    if (!caller) {
+      console.log('Caller not recognized by PIN:', callerPin);
+      twiml.say("Caller not recognized. Goodbye.");
+      twiml.hangup();
+      return res.type('text/xml').send(twiml.toString());
+    }
+
+    // If number is not yet provided, prompt user to enter number with 10s limit
+    if (!numberToCall) {
+      console.log('No number entered yet, prompting user...');
+      twiml.gather({
+        numDigits: 15,           // maximum digits user can enter
+        action: `${BASE_URL}/dial-number?pin=${callerPin}`, // submit back here
+        method: 'POST',
+        timeout: 10,             // <-- 10 seconds to enter number
+        finishOnKey: '',         // no special key to end input
+        input: 'dtmf',
+        actionOnEmptyResult: true
+      }).say("Enter the number you want to call, quickly. You have ten seconds.");
+
+      return res.type('text/xml').send(twiml.toString());
+    }
+
+    console.log(`Dialing ${numberToCall} for caller PIN: ${caller.pin}`);
+
+    // Dial the number via Twilio
+    const dial = twiml.dial({
+      action: `${BASE_URL}/call-ended?pin=${caller.pin}`, // callback when call ends
+      method: 'POST',
+      callerId: TWILIO_NUMBER
+    });
+
+    dial.number(numberToCall); // Twilio will connect the call
+
+    res.type('text/xml').send(twiml.toString());
+
+  } catch (err) {
+    console.error('Error /dial-number:', err);
+    res.status(503).send('Service Unavailable');
+  }
+});
 
 
 // ================= CALL ENDED =================
