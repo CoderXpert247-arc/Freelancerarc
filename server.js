@@ -132,78 +132,49 @@ async function debugEmail(to, subject, body) {
   }
 }
 
-// =================== TWILIO VOICE FLOW ===================
-const { VoiceResponse } = require('twilio').twiml;
-
-// Helper to find user with normalized phone
-async function findUser(phone) {
-  const normalized = phone.trim().replace(/[\s()-]/g, '');
-  console.log('[findUser] normalized phone:', normalized);
-  const user = await User.findOne({ phone: normalized });
-  if (user) {
-    console.log('[findUser] User found:', user.email);
-  } else {
-    console.log('[findUser] No user found for phone:', normalized);
-  }
-  return user;
-}
-
+// ================= TWILIO VOICE FLOW =================
 app.post('/voice', twilioParser, async (req, res) => {
   try {
     console.log('/voice called', req.body);
 
     const twiml = new VoiceResponse();
-    let caller = req.body.From;
+    let caller = req.body.From || '';
+    caller = caller.trim(); // remove leading/trailing spaces
 
-    if (!caller) {
-      console.warn('[voice] No From number provided');
-      twiml.say("We could not detect your number. Goodbye.");
-      twiml.hangup();
-      return res.type('text/xml').send(twiml.toString());
-    }
+    // Normalize phone: remove spaces, dashes, parentheses, keep '+'
+    caller = caller.replace(/[\s\-\(\)]/g, '');
 
-    // Normalize phone number: remove spaces, dashes, parentheses
-    caller = caller.trim().replace(/[\s\-\(\)]/g, '');
-    console.log('[voice] Normalized caller number:', caller);
-
-    // Find user using helper
-    const user = await findUser(caller);
+    // Find user (exact match)
+    const user = await User.findOne({ phone: caller });
 
     if (!user) {
-      console.warn('[voice] User not registered for:', caller);
-      twiml.say("You are not registered.");
+      twiml.say("You are not registered. Goodbye.");
       twiml.hangup();
     } else {
-      console.log('[voice] Registered user:', user.email);
-
-      // Store session with stage and attempts
+      // Store session for PIN input (5 min expiry)
       await setSession(`call:${caller}`, { stage: 'pin', attempts: 0 }, 300);
-      console.log('[voice] Session set for call:', caller);
 
-      // Stabilize audio
+      // Small pause to stabilize audio
       twiml.pause({ length: 1 });
 
       // Gather PIN input
-      twiml.gather({
+      const gather = twiml.gather({
         numDigits: 6,
         action: `${BASE_URL}/check-pin`,
         method: 'POST',
         input: 'dtmf',
         timeout: 10,
-        finishOnKey: '',
-        actionOnEmptyResult: true
-      }).say("Welcome. Enter your six digit PIN.");
-      console.log('[voice] Gather prompt sent for PIN input.');
+        finishOnKey: ''
+      });
+      gather.say("Welcome. Enter your six-digit PIN to continue.");
     }
 
     res.type('text/xml').send(twiml.toString());
   } catch (err) {
     console.error('Error /voice:', err);
-
     const twiml = new VoiceResponse();
     twiml.say("System error. Please try again later.");
     twiml.hangup();
-
     res.type('text/xml').send(twiml.toString());
   }
 });
