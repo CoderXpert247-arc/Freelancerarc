@@ -162,64 +162,67 @@ app.post('/voice', twilioParser, async (req, res) => {
   }
 });
 
-// ================= CHECK PIN =================
-app.post('/check-pin', twilioParser, async (req, res) => {
-  try {
-    const twiml = new VoiceResponse();
-    const caller = normalizePhone(req.body.From);
-    const pin = req.body.Digits;
-    const call = await getSession(`call:${caller}`);
 
-    if (!pin || pin.length < 6) {
-      twiml.say("I did not receive all six digits.");
-      twiml.redirect(`${BASE_URL}/voice`);
-      return res.type('text/xml').send(twiml.toString());
-    }
+// ================= CHECK PIN =================  
+app.post('/check-pin', twilioParser, async (req, res) => {  
+  try {  
+    const twiml = new VoiceResponse();  
+    const caller = normalizePhone(req.body.From); // ensure phone format consistent  
+    const pin = (req.body.Digits || "").trim();  // trim spaces to avoid mismatch  
+    const call = await getSession(`call:${caller}`);  
 
-    if (!call) {
-      twiml.say("Session expired.");
-      twiml.hangup();
-      return res.type('text/xml').send(twiml.toString());
-    }
+    if (!pin || pin.length < 6) {  
+      twiml.say("I did not receive all six digits.");  
+      twiml.redirect(`${BASE_URL}/voice`);  
+      return res.type('text/xml').send(twiml.toString());  
+    }  
 
-    call.attempts++;
-    const user = await findUser(caller);
+    if (!call) {  
+      twiml.say("Session expired.");  
+      twiml.hangup();  
+      return res.type('text/xml').send(twiml.toString());  
+    }  
 
-    if (!user || user.pin !== pin || call.attempts > 3) {
-      await deleteSession(`call:${caller}`);
-      twiml.say("Invalid PIN.");
-      twiml.hangup();
-      return res.type('text/xml').send(twiml.toString());
-    }
+    call.attempts++;  
+    const user = await User.findOne({ phone: caller }); // lookup by phone  
 
-    const otp = Math.floor(100000 + Math.random() * 900000).toString();
-    await setSession(`otp:${caller}`, { code: otp }, 600);
-    await setSession(`call:${caller}`, { stage: 'otp', pin, attempts: 0 }, 60);
+    if (!user || user.pin !== pin || call.attempts > 3) {  
+      await deleteSession(`call:${caller}`);  
+      twiml.say("Invalid PIN.");  
+      twiml.hangup();  
+      return res.type('text/xml').send(twiml.toString());  
+    }  
 
-    if (user.email) {
-      await debugEmail(user.email, "Your OTP Code", {
-        message: `Your OTP code is: ${otp}. It will expire in 10 minutes.`
-      });
-    }
+    const otp = Math.floor(100000 + Math.random() * 900000).toString();  
+    await setSession(`otp:${caller}`, { code: otp }, 600);  
+    await setSession(`call:${caller}`, { stage: 'otp', pin, attempts: 0 }, 600);  
 
-    twiml.gather({
-      numDigits: 6,
-      action: `${BASE_URL}/verify-otp`,
-      method: 'POST',
-      input: 'dtmf',
-      timeout: 60,
-      finishOnKey: '',
-      actionOnEmptyResult: true
-    }).say("OTP sent. Enter the code within 60 seconds.");
+    if (user.email) {  
+      await debugEmail(user.email, "Your OTP Code", {  
+        message: `Your OTP code is: ${otp}. It will expire in 10 minutes.`  
+      });  
+    }  
 
-    res.type('text/xml').send(twiml.toString());
-  } catch (err) {
-    const twiml = new VoiceResponse();
-    twiml.say("System error. Please try again later.");
-    twiml.hangup();
-    res.type('text/xml').send(twiml.toString());
-  }
+    twiml.gather({  
+      numDigits: 6,  
+      action: `${BASE_URL}/verify-otp`,  
+      method: 'POST',  
+      input: 'dtmf',  
+      timeout: 60,  
+      finishOnKey: '',  
+      actionOnEmptyResult: true  
+    }).say("OTP sent. Enter the code within 60 seconds.");  
+
+    res.type('text/xml').send(twiml.toString());  
+  } catch (err) {  
+    console.error('Error /check-pin:', err);  
+    const twiml = new VoiceResponse();  
+    twiml.say("System error. Please try again later.");  
+    twiml.hangup();  
+    res.type('text/xml').send(twiml.toString());  
+  }  
 });
+
 
 // ================= VERIFY OTP =================      
 app.post('/verify-otp', twilioParser, async (req, res) => {      
