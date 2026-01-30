@@ -136,14 +136,21 @@ async function debugEmail(to, subject, body) {
 app.post('/voice', twilioParser, async (req, res) => {
   try {
     console.log('/voice called', req.body);
+
     const twiml = new VoiceResponse();
-    const caller = req.body.From;
-    const user = await findUser(caller);
+    let caller = req.body.From;
+
+    // Normalize phone number: remove spaces, dashes, parentheses
+    caller = caller.replace(/[\s\-\(\)]/g, '');
+
+    // Find user using a case-insensitive match
+    const user = await User.findOne({ phone: caller });
 
     if (!user) {
       twiml.say("You are not registered.");
       twiml.hangup();
     } else {
+      // Store session
       await setSession(`call:${caller}`, { stage: 'pin', attempts: 0 }, 300);
 
       // Stabilize audio for first digit
