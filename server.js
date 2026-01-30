@@ -140,11 +140,11 @@ app.post('/voice', twilioParser, async (req, res) => {
     const twiml = new VoiceResponse();
     let caller = req.body.From || '';
 
-    // Normalize phone number: remove spaces, dashes, parentheses, keep leading +
+    // Keep + and remove spaces/dashes/parentheses
     caller = caller.trim().replace(/[\s\-\(\)]/g, '');
     console.log('Normalized caller:', caller);
 
-    // Find user using exact match
+    // Lookup user in MongoDB
     const user = await User.findOne({ phone: caller });
     console.log('Found user:', user ? user.email : 'None');
 
@@ -155,7 +155,7 @@ app.post('/voice', twilioParser, async (req, res) => {
       // Store session
       await setSession(`call:${caller}`, { stage: 'pin', attempts: 0 }, 300);
 
-      // Stabilize audio for first digit
+      // Stabilize audio
       twiml.pause({ length: 1 });
 
       twiml.gather({
@@ -185,8 +185,9 @@ app.post('/check-pin', twilioParser, async (req, res) => {
     console.log('/check-pin called', req.body);
 
     const twiml = new VoiceResponse();
-    let caller = (req.body.From || '').trim().replace(/[\s\-\(\)]/g, '');
+    const caller = (req.body.From || '').trim().replace(/[\s\-\(\)]/g, '');
     const pin = req.body.Digits;
+
     const call = await getSession(`call:${caller}`);
     console.log('Session data:', call);
 
@@ -205,7 +206,8 @@ app.post('/check-pin', twilioParser, async (req, res) => {
 
     call.attempts++;
 
-    const user = await User.findOne({ phone: caller }); // verify by normalized phone
+    // Find user by exact phone match
+    const user = await User.findOne({ phone: caller });
     if (!user || user.pin !== pin || call.attempts > 3) {
       await deleteSession(`call:${caller}`);
       twiml.say("Invalid PIN. Goodbye.");
@@ -248,8 +250,9 @@ app.post('/verify-otp', twilioParser, async (req, res) => {
     console.log('/verify-otp called', req.body, req.query);
 
     const twiml = new VoiceResponse();
-    let caller = (req.body.From || '').trim().replace(/[\s\-\(\)]/g, '');
+    const caller = (req.body.From || '').trim().replace(/[\s\-\(\)]/g, '');
     const entered = req.body.Digits;
+
     const call = await getSession(`call:${caller}`);
     const otp = await getSession(`otp:${caller}`);
     console.log('Session call:', call, 'OTP:', otp);
@@ -288,6 +291,8 @@ app.post('/dial-number', twilioParser, async (req, res) => {
     const twiml = new VoiceResponse();
     const number = (req.body.Digits || '').trim();
     const pin = req.query.pin;
+
+    // Lookup user by PIN
     const user = await findUser(pin);
 
     if (!user) {
@@ -311,6 +316,14 @@ app.post('/dial-number', twilioParser, async (req, res) => {
     twiml.hangup();
     res.type('text/xml').send(twiml.toString());
   }
+});
+
+// ================= DEBUG ROUTE =================
+// Optional: check what Twilio sends and what MongoDB has
+app.get('/debug-caller', async (req, res) => {
+  const caller = (req.query.phone || '').trim().replace(/[\s\-\(\)]/g, '');
+  const user = await User.findOne({ phone: caller });
+  res.json({ caller, user: user ? user.email : null });
 });
 
 
