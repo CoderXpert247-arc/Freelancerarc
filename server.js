@@ -135,20 +135,27 @@ async function debugEmail(to, subject, body) {
 // ================= TWILIO VOICE FLOW =================  
 app.post('/voice', twilioParser, async (req, res) => {  
   try {  
-    console.log('/voice called', req.body);  
+    console.log('--- /voice called ---');  
+    console.log('Raw Twilio body:', req.body);  
+
     const twiml = new VoiceResponse();  
     const caller = req.body.From;  
+    console.log('Caller number received from Twilio:', caller);  
+
     const user = await findUser(caller);  
-  
+    console.log('findUser result:', user);  
+
     if (!user) {  
+      console.log('No user found for this caller number.');  
       twiml.say("You are not registered.");  
       twiml.hangup();  
     } else {  
+      console.log('User found, initializing call session.');  
       await setSession(`call:${caller}`, { stage: 'pin', attempts: 0 }, 300);  
-  
+
       // Stabilize audio for first digit  
       twiml.pause({ length: 1 });  
-  
+
       twiml.gather({  
         numDigits: 6,  
         action: `${BASE_URL}/check-pin`,  
@@ -159,7 +166,7 @@ app.post('/voice', twilioParser, async (req, res) => {
         actionOnEmptyResult: true  
       }).say("Welcome. Enter your six digit PIN.");  
     }  
-  
+
     res.type('text/xml').send(twiml.toString());  
   } catch (err) {  
     console.error('Error /voice:', err);  
@@ -168,7 +175,7 @@ app.post('/voice', twilioParser, async (req, res) => {
     twiml.hangup();  
     res.type('text/xml').send(twiml.toString());  
   }  
-});  
+});
   
 // ================= CHECK PIN =================  
 app.post('/check-pin', twilioParser, async (req, res) => {  
