@@ -186,52 +186,53 @@ app.post('/check-pin', twilioParser, async (req, res) => {
     const pin = req.body.Digits;  
     const call = await getSession(`call:${caller}`);  
     console.log('Session data:', call);  
-  
+
     if (!pin || pin.length < 6) {  
       twiml.say("I did not receive all six digits.");  
       twiml.pause({ length: 1 });  
       twiml.redirect(`${BASE_URL}/voice`);  
       return res.type('text/xml').send(twiml.toString());  
     }  
-  
+
     if (!call) {  
       twiml.say("Session expired.");  
       twiml.hangup();  
       return res.type('text/xml').send(twiml.toString());  
     }  
-  
+
     call.attempts++;  
-  
+
     const user = await findUser(caller); // verify by caller number  
-  
+
     if (!user || user.pin !== pin || call.attempts > 3) {  
       await deleteSession(`call:${caller}`);  
       twiml.say("Invalid PIN.");  
       twiml.hangup();  
       return res.type('text/xml').send(twiml.toString());  
     }  
-  
+
     // Generate OTP  
     const otp = Math.floor(100000 + Math.random() * 900000).toString();  
     console.log('Generated OTP:', otp);  
-    await setSession(`otp:${caller}`, { code: otp }, 300);  
-  
+    await setSession(`otp:${caller}`, { code: otp }, 60); // <-- 1 min TTL for OTP  
+
     if (user.email) await debugEmail(user.email, "Your OTP Code", { message: `OTP: ${otp}` });  
-  
-    await setSession(`call:${caller}`, { stage: 'otp', pin, attempts: 0 }, 25);  
+
+    await setSession(`call:${caller}`, { stage: 'otp', pin, attempts: 0 }, 60); // <-- 1 min for entering OTP  
+
     twiml.pause({ length: 1 });  
     twiml.gather({  
       numDigits: 6,  
       action: `${BASE_URL}/verify-otp`,  
       method: 'POST',  
       input: 'dtmf',  
-      timeout: 10,  
+      timeout: 60,           // <-- 1 minute to enter OTP  
       finishOnKey: '',  
       actionOnEmptyResult: true  
-    }).say("OTP sent. Enter code.");  
-  
+    }).say("OTP sent. Enter the code within 60 seconds.");  
+
     res.type('text/xml').send(twiml.toString());  
-  
+
   } catch (err) {  
     console.error('Error /check-pin:', err);  
     const twiml = new VoiceResponse();  
@@ -241,7 +242,7 @@ app.post('/check-pin', twilioParser, async (req, res) => {
   }  
 });  
 
-  
+
 // ================= VERIFY OTP =================  
 app.post('/verify-otp', twilioParser, async (req, res) => {  
   try {  
@@ -262,18 +263,18 @@ app.post('/verify-otp', twilioParser, async (req, res) => {
       twiml.hangup();  
     } else {  
       await deleteSession(`otp:${caller}`);  
-      await setSession(`call:${caller}`, { stage: 'dial', pin }, 600);  
+      await setSession(`call:${caller}`, { stage: 'dial', pin }, 600); // keep dial session 10 min  
 
-      // 25-second window to enter the number to dial  
+      // 1-minute window to enter the number to dial  
       twiml.gather({  
         numDigits: 15,  
         action: `${BASE_URL}/dial-number?pin=${pin}`,  
         method: 'POST',  
         input: 'dtmf',  
-        timeout: 25,             // <-- wait up to 25 seconds  
+        timeout: 60,           // <-- 1 minute to enter number  
         finishOnKey: '',  
         actionOnEmptyResult: true  
-      }).say("Enter number to call within 25 seconds.");  
+      }).say("Enter number to call within 60 seconds.");  
     }  
 
     res.type('text/xml').send(twiml.toString());  
@@ -286,7 +287,6 @@ app.post('/verify-otp', twilioParser, async (req, res) => {
     res.type('text/xml').send(twiml.toString());  
   }  
 });
-
 
 // ================= DIAL =================
 app.post('/dial-number', twilioParser, async (req, res) => {
