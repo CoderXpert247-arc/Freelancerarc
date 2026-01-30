@@ -163,12 +163,13 @@ app.post('/voice', twilioParser, async (req, res) => {
 });
 
 
+
 // ================= CHECK PIN =================  
 app.post('/check-pin', twilioParser, async (req, res) => {  
   try {  
     const twiml = new VoiceResponse();  
-    const caller = normalizePhone(req.body.From); // ensure phone format consistent  
-    const pin = (req.body.Digits || "").trim();  // trim spaces to avoid mismatch  
+    const caller = normalizePhone(req.body.From);  
+    const pin = (req.body.Digits || "").trim();  
     const call = await getSession(`call:${caller}`);  
 
     if (!pin || pin.length < 6) {  
@@ -184,7 +185,9 @@ app.post('/check-pin', twilioParser, async (req, res) => {
     }  
 
     call.attempts++;  
-    const user = await User.findOne({ phone: caller }); // lookup by phone  
+
+    // ✅ Lookup user by phone stored in session (caller)  
+    const user = await findUser(caller);  
 
     if (!user || user.pin !== pin || call.attempts > 3) {  
       await deleteSession(`call:${caller}`);  
