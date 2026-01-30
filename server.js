@@ -132,199 +132,176 @@ async function debugEmail(to, subject, body) {
   }
 }
 
-// ================= TWILIO VOICE FLOW =================
-app.post('/voice', twilioParser, async (req, res) => {
-  try {
-    console.log('/voice called', req.body);
-
-    const twiml = new VoiceResponse();
-    let caller = req.body.From || '';
-
-    // Keep + and remove spaces/dashes/parentheses
-    caller = caller.trim().replace(/[\s\-\(\)]/g, '');
-    console.log('Normalized caller:', caller);
-
-    // Lookup user in MongoDB
-    const user = await User.findOne({ phone: caller });
-    console.log('Found user:', user ? user.email : 'None');
-
-    if (!user) {
-      twiml.say("You are not registered. Goodbye.");
-      twiml.hangup();
-    } else {
-      // Store session
-      await setSession(`call:${caller}`, { stage: 'pin', attempts: 0 }, 300);
-
-      // Stabilize audio
-      twiml.pause({ length: 1 });
-
-      twiml.gather({
-        numDigits: 6,
-        action: `${BASE_URL}/check-pin`,
-        method: 'POST',
-        input: 'dtmf',
-        timeout: 10,
-        finishOnKey: '',
-        actionOnEmptyResult: true
-      }).say("Welcome. Enter your six-digit PIN.");
-    }
-
-    res.type('text/xml').send(twiml.toString());
-  } catch (err) {
-    console.error('Error /voice:', err);
-    const twiml = new VoiceResponse();
-    twiml.say("System error. Please try again later.");
-    twiml.hangup();
-    res.type('text/xml').send(twiml.toString());
-  }
-});
-
-// ================= CHECK PIN =================
-app.post('/check-pin', twilioParser, async (req, res) => {
-  try {
-    console.log('/check-pin called', req.body);
-
-    const twiml = new VoiceResponse();
-    const caller = (req.body.From || '').trim().replace(/[\s\-\(\)]/g, '');
-    const pin = req.body.Digits;
-
-    const call = await getSession(`call:${caller}`);
-    console.log('Session data:', call);
-
-    if (!pin || pin.length < 6) {
-      twiml.say("I did not receive all six digits.");
-      twiml.pause({ length: 1 });
-      twiml.redirect(`${BASE_URL}/voice`);
-      return res.type('text/xml').send(twiml.toString());
-    }
-
-    if (!call) {
-      twiml.say("Session expired. Goodbye.");
-      twiml.hangup();
-      return res.type('text/xml').send(twiml.toString());
-    }
-
-    call.attempts++;
-
-    // Find user by exact phone match
-    const user = await User.findOne({ phone: caller });
-    if (!user || user.pin !== pin || call.attempts > 3) {
-      await deleteSession(`call:${caller}`);
-      twiml.say("Invalid PIN. Goodbye.");
-      twiml.hangup();
-      return res.type('text/xml').send(twiml.toString());
-    }
-
-    // Generate OTP
-    const otp = Math.floor(100000 + Math.random() * 900000).toString();
-    console.log('Generated OTP:', otp);
-    await setSession(`otp:${caller}`, { code: otp }, 300);
-
-    if (user.email) await debugEmail(user.email, "Your OTP Code", { message: `OTP: ${otp}` });
-
-    await setSession(`call:${caller}`, { stage: 'otp', pin, attempts: 0 }, 300);
-    twiml.pause({ length: 1 });
-    twiml.gather({
-      numDigits: 6,
-      action: `${BASE_URL}/verify-otp`,
-      method: 'POST',
-      input: 'dtmf',
-      timeout: 10,
-      finishOnKey: '',
-      actionOnEmptyResult: true
-    }).say("OTP sent. Enter code.");
-
-    res.type('text/xml').send(twiml.toString());
-  } catch (err) {
-    console.error('Error /check-pin:', err);
-    const twiml = new VoiceResponse();
-    twiml.say("System error. Please try again later.");
-    twiml.hangup();
-    res.type('text/xml').send(twiml.toString());
-  }
-});
-
-// ================= VERIFY OTP =================
-app.post('/verify-otp', twilioParser, async (req, res) => {
-  try {
-    console.log('/verify-otp called', req.body, req.query);
-
-    const twiml = new VoiceResponse();
-    const caller = (req.body.From || '').trim().replace(/[\s\-\(\)]/g, '');
-    const entered = req.body.Digits;
-
-    const call = await getSession(`call:${caller}`);
-    const otp = await getSession(`otp:${caller}`);
-    console.log('Session call:', call, 'OTP:', otp);
-
-    if (!call || !otp || entered !== otp.code) {
-      await deleteSession(`call:${caller}`);
-      await deleteSession(`otp:${caller}`);
-      twiml.say("OTP failed. Goodbye.");
-      twiml.hangup();
-    } else {
-      await deleteSession(`otp:${caller}`);
-      await setSession(`call:${caller}`, { stage: 'dial', pin: call.pin }, 600);
-
-      twiml.gather({
-        numDigits: 15,
-        action: `${BASE_URL}/dial-number?pin=${call.pin}`,
-        method: 'POST'
-      }).say("Enter the number you wish to call.");
-    }
-
-    res.type('text/xml').send(twiml.toString());
-  } catch (err) {
-    console.error('Error /verify-otp:', err);
-    const twiml = new VoiceResponse();
-    twiml.say("System error. Please try again later.");
-    twiml.hangup();
-    res.type('text/xml').send(twiml.toString());
-  }
-});
-
-// ================= DIAL =================
-app.post('/dial-number', twilioParser, async (req, res) => {
-  try {
-    console.log('/dial-number called', req.body, req.query);
-
-    const twiml = new VoiceResponse();
-    const number = (req.body.Digits || '').trim();
-    const pin = req.query.pin;
-
-    // Lookup user by PIN
-    const user = await findUser(pin);
-
-    if (!user) {
-      twiml.say("User not found. Goodbye.");
-      twiml.hangup();
-    } else {
-      console.log(`Dialing number ${number} for user ${user.pin}`);
-      const dial = twiml.dial({
-        action: `${BASE_URL}/call-ended?pin=${pin}`,
-        method: 'POST',
-        callerId: TWILIO_NUMBER
-      });
-      dial.number(number);
-    }
-
-    res.type('text/xml').send(twiml.toString());
-  } catch (err) {
-    console.error('Error /dial-number:', err);
-    const twiml = new VoiceResponse();
-    twiml.say("System error. Cannot process your call.");
-    twiml.hangup();
-    res.type('text/xml').send(twiml.toString());
-  }
-});
-
-// ================= DEBUG ROUTE =================
-// Optional: check what Twilio sends and what MongoDB has
-app.get('/debug-caller', async (req, res) => {
-  const caller = (req.query.phone || '').trim().replace(/[\s\-\(\)]/g, '');
-  const user = await User.findOne({ phone: caller });
-  res.json({ caller, user: user ? user.email : null });
-});
+// ================= TWILIO VOICE FLOW =================  
+app.post('/voice', twilioParser, async (req, res) => {  
+  try {  
+    console.log('/voice called', req.body);  
+    const twiml = new VoiceResponse();  
+    const caller = req.body.From;  
+    const user = await findUser(caller);  
+  
+    if (!user) {  
+      twiml.say("You are not registered.");  
+      twiml.hangup();  
+    } else {  
+      await setSession(`call:${caller}`, { stage: 'pin', attempts: 0 }, 300);  
+  
+      // Stabilize audio for first digit  
+      twiml.pause({ length: 1 });  
+  
+      twiml.gather({  
+        numDigits: 6,  
+        action: `${BASE_URL}/check-pin`,  
+        method: 'POST',  
+        input: 'dtmf',  
+        timeout: 10,  
+        finishOnKey: '',  
+        actionOnEmptyResult: true  
+      }).say("Welcome. Enter your six digit PIN.");  
+    }  
+  
+    res.type('text/xml').send(twiml.toString());  
+  } catch (err) {  
+    console.error('Error /voice:', err);  
+    const twiml = new VoiceResponse();  
+    twiml.say("System error. Please try again later.");  
+    twiml.hangup();  
+    res.type('text/xml').send(twiml.toString());  
+  }  
+});  
+  
+// ================= CHECK PIN =================  
+app.post('/check-pin', twilioParser, async (req, res) => {  
+  try {  
+    console.log('/check-pin called', req.body);  
+    const twiml = new VoiceResponse();  
+    const caller = req.body.From;  
+    const pin = req.body.Digits;  
+    const call = await getSession(`call:${caller}`);  
+    console.log('Session data:', call);  
+  
+    if (!pin || pin.length < 6) {  
+      twiml.say("I did not receive all six digits.");  
+      twiml.pause({ length: 1 });  
+      twiml.redirect(`${BASE_URL}/voice`);  
+      return res.type('text/xml').send(twiml.toString());  
+    }  
+  
+    if (!call) {  
+      twiml.say("Session expired.");  
+      twiml.hangup();  
+      return res.type('text/xml').send(twiml.toString());  
+    }  
+  
+    call.attempts++;  
+  
+    const user = await findUser(caller); // verify by caller number  
+  
+    if (!user || user.pin !== pin || call.attempts > 3) {  
+      await deleteSession(`call:${caller}`);  
+      twiml.say("Invalid PIN.");  
+      twiml.hangup();  
+      return res.type('text/xml').send(twiml.toString());  
+    }  
+  
+    // Generate OTP  
+    const otp = Math.floor(100000 + Math.random() * 900000).toString();  
+    console.log('Generated OTP:', otp);  
+    await setSession(`otp:${caller}`, { code: otp }, 300);  
+  
+    if (user.email) await debugEmail(user.email, "Your OTP Code", { message: `OTP: ${otp}` });  
+  
+    await setSession(`call:${caller}`, { stage: 'otp', pin, attempts: 0 }, 300);  
+    twiml.pause({ length: 1 });  
+    twiml.gather({  
+      numDigits: 6,  
+      action: `${BASE_URL}/verify-otp`,  
+      method: 'POST',  
+      input: 'dtmf',  
+      timeout: 10,  
+      finishOnKey: '',  
+      actionOnEmptyResult: true  
+    }).say("OTP sent. Enter code.");  
+  
+    res.type('text/xml').send(twiml.toString());  
+  
+  } catch (err) {  
+    console.error('Error /check-pin:', err);  
+    const twiml = new VoiceResponse();  
+    twiml.say("System error. Please try again later.");  
+    twiml.hangup();  
+    res.type('text/xml').send(twiml.toString());  
+  }  
+});  
+  
+// ================= VERIFY OTP =================  
+app.post('/verify-otp', twilioParser, async (req, res) => {  
+  try {  
+    console.log('/verify-otp called', req.body, req.query);  
+    const twiml = new VoiceResponse();  
+    const caller = req.body.From;  
+    const pin = req.query.pin;  
+    const entered = req.body.Digits;  
+  
+    const call = await getSession(`call:${caller}`);  
+    const otp = await getSession(`otp:${caller}`);  
+    console.log('Session call:', call, 'OTP:', otp);  
+  
+    if (!call || !otp || entered !== otp.code) {  
+      await deleteSession(`call:${caller}`);  
+      await deleteSession(`otp:${caller}`);  
+      twiml.say("OTP failed.");  
+      twiml.hangup();  
+    } else {  
+      await deleteSession(`otp:${caller}`);  
+      await setSession(`call:${caller}`, { stage: 'dial', pin }, 600);  
+  
+      twiml.gather({  
+        numDigits: 15,  
+        action: `${BASE_URL}/dial-number?pin=${pin}`,  
+        method: 'POST'  
+      }).say("Enter number to call.");  
+    }  
+  
+    res.type('text/xml').send(twiml.toString());  
+  
+  } catch (err) {  
+    console.error('Error /verify-otp:', err);  
+    const twiml = new VoiceResponse();  
+    twiml.say("System error. Please try again later.");  
+    twiml.hangup();  
+    res.type('text/xml').send(twiml.toString());  
+  }  
+});  
+  
+// ================= DIAL =================  
+app.post('/dial-number', twilioParser, async (req, res) => {  
+  try {  
+    console.log('/dial-number called', req.body, req.query);  
+    const twiml = new VoiceResponse();  
+    const number = req.body.Digits;  
+    const pin = req.query.pin;  
+    const user = await findUser(pin);  
+  
+    if (!user) {  
+      twiml.say("User not found.");  
+      twiml.hangup();  
+    } else {  
+      console.log(`Dialing number ${number} for user ${user.pin}`);  
+      const dial = twiml.dial({  
+        action: `${BASE_URL}/call-ended?pin=${pin}`,  
+        method: 'POST',  
+        callerId: TWILIO_NUMBER  
+      });  
+      dial.number(number);  
+    }  
+  
+    res.type('text/xml').send(twiml.toString());  
+  } catch (err) {  
+    console.error('Error /dial-number:', err);  
+    res.status(503).send('Service Unavailable');  
+  }  
+});  
 
 
 // ================= CALL ENDED =================
