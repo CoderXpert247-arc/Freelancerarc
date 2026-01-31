@@ -277,8 +277,7 @@ app.post('/verify-otp', twilioParser, async (req, res) => {
   
   
   
-
- // ================= DIAL =================  
+// ================= DIAL (CALLBACK MODE) =================  
 app.post('/dial-number', twilioParser, async (req, res) => {  
   const twiml = new VoiceResponse();  
   const callerNumberRaw = req.body.From;  
@@ -310,9 +309,8 @@ app.post('/dial-number', twilioParser, async (req, res) => {
         input: 'dtmf',  
         finishOnKey: '',  
         actionOnEmptyResult: true  
-      }).say(  
-        "Enter the country code followed by the number you want to call. Do not include the leading zero. You have sixty seconds."  
-      );  
+      }).say("Enter the country code followed by the number you want to call.");  
+
       return res.type('text/xml').send(twiml.toString());  
     }  
 
@@ -345,25 +343,23 @@ app.post('/dial-number', twilioParser, async (req, res) => {
 
     const maxCallSeconds = Math.floor(availableMinutes * 60);  
 
-    // ============ CONFERENCE BRIDGE INSTEAD OF DIRECT DIAL ============  
-    const room = `room-${caller._id}-${Date.now()}`;  
+    // ================= SAVE CALLBACK SESSION =================  
+    await setSession(`callback:${callerNumber}`, {  
+      target: numberToCall,  
+      maxCallSeconds  
+    }, maxCallSeconds + 120);  
 
-    await setSession(`room:${room}`, { userId: caller._id }, maxCallSeconds + 60);  
-
-    const dial = twiml.dial();  
-    dial.conference({  
-      startConferenceOnEnter: false,  
-      endConferenceOnExit: true,  
-      waitUrl: 'http://twimlets.com/holdmusic?Bucket=com.twilio.music.classical'  
-    }, room);  
+    // Tell user to hang up (saves their airtime)  
+    twiml.say("Please hang up. We will call you back shortly.");  
+    twiml.hangup();  
 
     res.type('text/xml').send(twiml.toString());  
 
-    // -------- Create outbound call leg --------  
+    // ================= TRIGGER CALLBACK TO USER =================  
     await client.calls.create({  
-      to: numberToCall,  
+      to: callerNumber,  
       from: TWILIO_NUMBER,  
-      url: `${BASE_URL}/outbound-join?room=${room}`,  
+      url: `${BASE_URL}/callback-answer`,  
       statusCallback: `${BASE_URL}/call-ended`,  
       statusCallbackEvent: ['completed'],  
       timeLimit: maxCallSeconds  
@@ -378,6 +374,53 @@ app.post('/dial-number', twilioParser, async (req, res) => {
 });  
 
 
+// ================= CALLBACK ANSWER =================  
+app.post('/callback-answer', twilioParser, async (req, res) => {  
+  const twiml = new VoiceResponse();  
+
+  try {  
+    const callerNumber = normalizePhone(req.body.To);  
+
+    const data = await getSession(`callback:${callerNumber}`);  
+    if (!data) {  
+      twiml.say("Session expired.");  
+      twiml.hangup();  
+      return res.type('text/xml').send(twiml.toString());  
+    }  
+
+    const room = `room-${Date.now()}`;  
+
+    await setSession(`room:${room}`, { caller: callerNumber }, data.maxCallSeconds + 60);  
+
+    const dial = twiml.dial();  
+    dial.conference({  
+      startConferenceOnEnter: false,  
+      endConferenceOnExit: true,  
+      waitUrl: 'http://twimlets.com/holdmusic?Bucket=com.twilio.music.classical'  
+    }, room);  
+
+    res.type('text/xml').send(twiml.toString());  
+
+    // Call destination person  
+    await client.calls.create({  
+      to: data.target,  
+      from: TWILIO_NUMBER,  
+      url: `${BASE_URL}/outbound-join?room=${room}`,  
+      statusCallback: `${BASE_URL}/call-ended`,  
+      statusCallbackEvent: ['completed'],  
+      timeLimit: data.maxCallSeconds  
+    });  
+
+  } catch (err) {  
+    console.error('Error /callback-answer:', err);  
+    twiml.say("System error.");  
+    twiml.hangup();  
+    res.type('text/xml').send(twiml.toString());  
+  }  
+});
+ 
+
+ 
 // ================= OUTBOUND JOIN =================  
 app.post('/outbound-join', twilioParser, (req, res) => {  
   const room = req.query.room;  
