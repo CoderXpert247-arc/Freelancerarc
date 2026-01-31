@@ -393,48 +393,66 @@ app.post('/outbound-join', twilioParser, (req, res) => {
 });  
 
 
-// ================= CALL ENDED =================        
-app.post('/call-ended', twilioParser, async (req, res) => {        
-  try {        
-    const callerNumber = req.body.From;        
-    const duration = parseInt(req.body.CallDuration || 0);        
-    const minutesUsed = duration / 60;        
 
-    const user = await findUser(callerNumber);        
+     // ================= CALL ENDED (BILLING CORE) =================
+app.post('/call-ended', twilioParser, async (req, res) => {
+  try {
+    // Twilio sends this only for real call legs — NOT OTP/PIN routes
+    const callerNumber = normalizePhone(req.body.From);
+    const callStatus = req.body.CallStatus; // completed, busy, no-answer etc
+    const durationSeconds = parseInt(req.body.CallDuration || 0); // in SECONDS
 
-    if (user) {        
-      let remaining = minutesUsed;        
-      const now = Date.now();        
+    // If call never actually connected, duration = 0
+    if (callStatus !== 'completed' || durationSeconds <= 0) {
+      return res.sendStatus(200); // nothing to bill
+    }
 
-      user.plans.sort((a, b) => new Date(a.expiresAt) - new Date(b.expiresAt));        
+    const minutesUsed = durationSeconds / 60; // convert once
 
-      for (let plan of user.plans) {        
-        if (remaining <= 0) break;        
-        if (new Date(plan.expiresAt).getTime() > now && plan.minutes > 0) {        
-          const used = Math.min(plan.minutes, remaining);        
-          plan.minutes -= used;        
-          remaining -= used;        
-        }        
-      }        
+    const user = await findUser(callerNumber);
+    if (!user) return res.sendStatus(200);
 
-      if (remaining > 0) {        
-        const cost = (remaining / 60) * RATE;        
-        user.balance = Math.max(0, user.balance - cost);        
-      }        
+    let remainingMinutesToCharge = minutesUsed;
+    const now = Date.now();
 
-      user.totalCalls = (user.totalCalls || 0) + minutesUsed;        
-      await user.save();        
+    // -------- USE PLAN MINUTES FIRST --------
+    if (Array.isArray(user.plans) && user.plans.length > 0) {
+      // Use earliest expiring plan first
+      user.plans.sort((a, b) => new Date(a.expiresAt) - new Date(b.expiresAt));
 
-      await debugEmail(user.email, "Call Summary", {        
-        message: `Used ${minutesUsed.toFixed(2)} minutes.`        
-      });        
-    }        
+      for (let plan of user.plans) {
+        if (remainingMinutesToCharge <= 0) break;
 
-    res.sendStatus(200);        
-  } catch (err) {        
-    console.error('Error /call-ended:', err);        
-    res.status(503).send('Service Unavailable');        
-  }        
+        const planValid = plan.expiresAt && new Date(plan.expiresAt).getTime() > now;
+        if (planValid && plan.minutes > 0) {
+          const used = Math.min(plan.minutes, remainingMinutesToCharge);
+          plan.minutes -= used;
+          remainingMinutesToCharge -= used;
+        }
+      }
+    }
+
+    // -------- THEN USE WALLET BALANCE --------
+    if (remainingMinutesToCharge > 0) {
+      const cost = remainingMinutesToCharge * RATE; // RATE = cost per minute
+      user.balance = Math.max(0, user.balance - cost);
+    }
+
+    // -------- STATS --------
+    user.totalCalls = (user.totalCalls || 0) + minutesUsed;
+
+    await user.save();
+
+    await debugEmail(user.email, "Call Summary", {
+      message: `Call lasted ${(durationSeconds).toFixed(0)} seconds (${minutesUsed.toFixed(2)} minutes).`
+    });
+
+    res.sendStatus(200);
+
+  } catch (err) {
+    console.error('Error /call-ended:', err);
+    res.status(503).send('Service Unavailable');
+  }
 });
 
 
