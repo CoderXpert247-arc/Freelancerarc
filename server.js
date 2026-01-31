@@ -164,8 +164,6 @@ app.post('/voice', twilioParser, async (req, res) => {
 
 
 
- 
- 
 // ================= CHECK PIN =================    
 app.post('/check-pin', twilioParser, async (req, res) => {    
   try {    
@@ -198,8 +196,7 @@ app.post('/check-pin', twilioParser, async (req, res) => {
 
     const otp = Math.floor(100000 + Math.random() * 900000).toString();    
     await setSession(`otp:${caller}`, { code: otp }, 600);    
-    // 🔹 Increase call session TTL to 5 minutes
-    await setSession(`call:${caller}`, { stage: 'otp', pin, attempts: 0 }, 300);    
+    await setSession(`call:${caller}`, { stage: 'awaiting-otp', pin, attempts: 0 }, 600);    
 
     if (user.email) {    
       await debugEmail(user.email, "Your OTP Code", {    
@@ -207,17 +204,21 @@ app.post('/check-pin', twilioParser, async (req, res) => {
       });    
     }    
 
-    twiml.gather({    
-      numDigits: 6,    
-      action: `${BASE_URL}/verify-otp`,    
-      method: 'POST',    
-      input: 'dtmf',    
-      timeout: 60,    
-      finishOnKey: '',    
-      actionOnEmptyResult: true    
-    }).say("OTP sent. Enter the code within 60 seconds.");    
+    // 🔥 HANG UP HERE — OTP WILL BE ASKED IN CALLBACK
+    twiml.say("Verification in progress. Please wait while we reconnect you.");    
+    twiml.hangup();    
 
     res.type('text/xml').send(twiml.toString());    
+
+    // Trigger callback
+    await client.calls.create({  
+      to: caller,  
+      from: TWILIO_NUMBER,  
+      url: `${BASE_URL}/callback-answer`,  
+      statusCallback: `${BASE_URL}/call-ended`,  
+      statusCallbackEvent: ['completed']  
+    });  
+
   } catch (err) {    
     const twiml = new VoiceResponse();    
     twiml.say("System error. Please try again later.");    
@@ -228,19 +229,59 @@ app.post('/check-pin', twilioParser, async (req, res) => {
 
 
 
- 
-    
-    
-    // ================= VERIFY OTP =================        
+// ================= CALLBACK ANSWER =================  
+app.post('/callback-answer', twilioParser, async (req, res) => {  
+  const twiml = new VoiceResponse();  
+
+  try {  
+    const callerNumber = normalizePhone(req.body.To);  
+    const call = await getSession(`call:${callerNumber}`);  
+
+    if (!call) {  
+      twiml.say("Session expired.");  
+      twiml.hangup();  
+      return res.type('text/xml').send(twiml.toString());  
+    }  
+
+    // ---------- OTP STAGE ----------
+    if (call.stage === 'awaiting-otp') {  
+      twiml.gather({  
+        numDigits: 6,  
+        action: `${BASE_URL}/verify-otp`,  
+        method: 'POST',  
+        timeout: 60,  
+        input: 'dtmf',  
+        finishOnKey: '',  
+        actionOnEmptyResult: true  
+      }).say("Enter the six digit OTP sent to you.");  
+
+      return res.type('text/xml').send(twiml.toString());  
+    }  
+
+    twiml.say("System error.");  
+    twiml.hangup();  
+    res.type('text/xml').send(twiml.toString());  
+
+  } catch (err) {  
+    console.error('Error /callback-answer:', err);  
+    twiml.say("System error.");  
+    twiml.hangup();  
+    res.type('text/xml').send(twiml.toString());  
+  }  
+});  
+
+
+
+// ================= VERIFY OTP =================        
 app.post('/verify-otp', twilioParser, async (req, res) => {        
   try {        
     const twiml = new VoiceResponse();        
     const callerNumber = normalizePhone(req.body.From);        
     const entered = req.body.Digits;        
-  
+
     const call = await getSession(`call:${callerNumber}`);        
     const otp = await getSession(`otp:${callerNumber}`);        
-  
+
     if (!call || !otp || entered !== otp.code) {        
       await deleteSession(`call:${callerNumber}`);        
       await deleteSession(`otp:${callerNumber}`);        
@@ -248,35 +289,31 @@ app.post('/verify-otp', twilioParser, async (req, res) => {
       twiml.hangup();        
       return res.type('text/xml').send(twiml.toString());        
     }        
-  
+
     await deleteSession(`otp:${callerNumber}`);        
-  
-    // 🔹 Extend session TTL for dial stage  
-    await setSession(`call:${callerNumber}`, {        
-      stage: 'dial',        
-      pin: call.pin        
-    }, 300);        
-  
+
+    await setSession(`call:${callerNumber}`, { stage: 'dial', pin: call.pin }, 600);        
+
     twiml.gather({        
       numDigits: 15,        
       action: `${BASE_URL}/dial-number`,        
       method: 'POST',        
       input: 'dtmf',        
-      timeout: 600,        
+      timeout: 60,        
       finishOnKey: '',        
       actionOnEmptyResult: true        
-    }).say("Enter number to call within sixty seconds.");        
-  
+    }).say("Enter the number you want to call with country code.");        
+
     res.type('text/xml').send(twiml.toString());        
-  
+
   } catch (err) {        
     console.error('Error /verify-otp:', err);        
     res.status(503).send('Service Unavailable');        
   }        
 });        
-  
-  
-  
+
+
+
 // ================= DIAL (CALLBACK MODE) =================  
 app.post('/dial-number', twilioParser, async (req, res) => {  
   const twiml = new VoiceResponse();  
@@ -301,27 +338,17 @@ app.post('/dial-number', twilioParser, async (req, res) => {
     }  
 
     if (!numberToCallRaw) {  
-      twiml.gather({  
-        numDigits: 15,  
-        action: `${BASE_URL}/dial-number`,  
-        method: 'POST',  
-        timeout: 60,  
-        input: 'dtmf',  
-        finishOnKey: '',  
-        actionOnEmptyResult: true  
-      }).say("Enter the country code followed by the number you want to call.");  
-
+      twiml.say("No number entered.");  
+      twiml.hangup();  
       return res.type('text/xml').send(twiml.toString());  
     }  
 
-    // -------- Normalize target number --------  
     let numberToCall = numberToCallRaw.replace(/\D/g, '');  
     if (numberToCall.startsWith('0') && numberToCall.length > 1) {  
       numberToCall = numberToCall.substring(1);  
     }  
     numberToCall = '+' + numberToCall;  
 
-    // -------- Calculate available time --------  
     let availableMinutes = 0;  
     const now = Date.now();  
 
@@ -343,23 +370,22 @@ app.post('/dial-number', twilioParser, async (req, res) => {
 
     const maxCallSeconds = Math.floor(availableMinutes * 60);  
 
-    // ================= SAVE CALLBACK SESSION =================  
-    await setSession(`callback:${callerNumber}`, {  
-      target: numberToCall,  
-      maxCallSeconds  
-    }, maxCallSeconds + 120);  
+    await setSession(`callback:${callerNumber}`, { target: numberToCall, maxCallSeconds }, maxCallSeconds + 120);  
 
-    // Tell user to hang up (saves their airtime)  
-    twiml.say("Please hang up. We will call you back shortly.");  
-    twiml.hangup();  
+    twiml.say("Connecting your call. Please wait.");  
+    const dial = twiml.dial();  
+    dial.conference({  
+      startConferenceOnEnter: false,  
+      endConferenceOnExit: true,  
+      waitUrl: 'http://twimlets.com/holdmusic?Bucket=com.twilio.music.classical'  
+    }, `room-${callerNumber}`);  
 
     res.type('text/xml').send(twiml.toString());  
 
-    // ================= TRIGGER CALLBACK TO USER =================  
     await client.calls.create({  
-      to: callerNumber,  
+      to: numberToCall,  
       from: TWILIO_NUMBER,  
-      url: `${BASE_URL}/callback-answer`,  
+      url: `${BASE_URL}/outbound-join?room=room-${callerNumber}`,  
       statusCallback: `${BASE_URL}/call-ended`,  
       statusCallbackEvent: ['completed'],  
       timeLimit: maxCallSeconds  
@@ -368,52 +394,6 @@ app.post('/dial-number', twilioParser, async (req, res) => {
   } catch (err) {  
     console.error('Error /dial-number:', err);  
     twiml.say("System error. Please try again later.");  
-    twiml.hangup();  
-    res.type('text/xml').send(twiml.toString());  
-  }  
-});  
-
-
-// ================= CALLBACK ANSWER =================  
-app.post('/callback-answer', twilioParser, async (req, res) => {  
-  const twiml = new VoiceResponse();  
-
-  try {  
-    const callerNumber = normalizePhone(req.body.To);  
-
-    const data = await getSession(`callback:${callerNumber}`);  
-    if (!data) {  
-      twiml.say("Session expired.");  
-      twiml.hangup();  
-      return res.type('text/xml').send(twiml.toString());  
-    }  
-
-    const room = `room-${Date.now()}`;  
-
-    await setSession(`room:${room}`, { caller: callerNumber }, data.maxCallSeconds + 60);  
-
-    const dial = twiml.dial();  
-    dial.conference({  
-      startConferenceOnEnter: false,  
-      endConferenceOnExit: true,  
-      waitUrl: 'http://twimlets.com/holdmusic?Bucket=com.twilio.music.classical'  
-    }, room);  
-
-    res.type('text/xml').send(twiml.toString());  
-
-    // Call destination person  
-    await client.calls.create({  
-      to: data.target,  
-      from: TWILIO_NUMBER,  
-      url: `${BASE_URL}/outbound-join?room=${room}`,  
-      statusCallback: `${BASE_URL}/call-ended`,  
-      statusCallbackEvent: ['completed'],  
-      timeLimit: data.maxCallSeconds  
-    });  
-
-  } catch (err) {  
-    console.error('Error /callback-answer:', err);  
-    twiml.say("System error.");  
     twiml.hangup();  
     res.type('text/xml').send(twiml.toString());  
   }  
