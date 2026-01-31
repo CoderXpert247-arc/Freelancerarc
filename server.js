@@ -277,64 +277,56 @@ app.post('/verify-otp', twilioParser, async (req, res) => {
   
   
   
-// ================= DIAL =================  
+
+ // ================= DIAL =================  
 app.post('/dial-number', twilioParser, async (req, res) => {  
   const twiml = new VoiceResponse();  
   const callerNumberRaw = req.body.From;  
   let numberToCallRaw = req.body.Digits;  
-  
+
   try {  
-    // ---------------- NORMALIZE CALLER NUMBER ----------------  
-    const callerNumber = normalizePhone(callerNumberRaw); // e.g., "+2347012345678"  
-  
-    // ---------------- GET CALL SESSION ----------------  
+    const callerNumber = normalizePhone(callerNumberRaw);  
+
     const call = await getSession(`call:${callerNumber}`);  
     if (!call || call.stage !== 'dial' || !call.pin) {  
       twiml.say("Session expired. Goodbye.");  
       twiml.hangup();  
       return res.type('text/xml').send(twiml.toString());  
     }  
-  
-    // ---------------- FIND CALLER IN DB ----------------  
+
     const caller = await findUser(callerNumber);  
     if (!caller) {  
       twiml.say("Caller not recognized. Goodbye.");  
       twiml.hangup();  
       return res.type('text/xml').send(twiml.toString());  
     }  
-  
-    // ---------------- PROMPT USER IF NO NUMBER PROVIDED ----------------  
+
     if (!numberToCallRaw) {  
       twiml.gather({  
-        numDigits: 15,       // max digits  
+        numDigits: 15,  
         action: `${BASE_URL}/dial-number`,  
         method: 'POST',  
-        timeout: 60,          // 60 seconds gather timeout  
+        timeout: 60,  
         input: 'dtmf',  
         finishOnKey: '',  
         actionOnEmptyResult: true  
       }).say(  
-        "Enter the country code followed by the number you want to call. " +  
-        "Do not include the leading zero. You have sixty seconds."  
+        "Enter the country code followed by the number you want to call. Do not include the leading zero. You have sixty seconds."  
       );  
       return res.type('text/xml').send(twiml.toString());  
     }  
-  
-    // ---------------- NORMALIZE NUMBER TO CALL ----------------  
-    let numberToCall = numberToCallRaw.replace(/\D/g, ''); // digits only  
+
+    // -------- Normalize target number --------  
+    let numberToCall = numberToCallRaw.replace(/\D/g, '');  
     if (numberToCall.startsWith('0') && numberToCall.length > 1) {  
       numberToCall = numberToCall.substring(1);  
     }  
-    // Ensure E.164 format  
-    if (!numberToCall.startsWith('+')) {  
-      numberToCall = '+' + numberToCall;  
-    }  
-  
-    // ---------------- CALCULATE AVAILABLE CALL TIME ----------------  
+    numberToCall = '+' + numberToCall;  
+
+    // -------- Calculate available time --------  
     let availableMinutes = 0;  
     const now = Date.now();  
-  
-    // Sum valid plan minutes  
+
     if (Array.isArray(caller.plans)) {  
       caller.plans.forEach(plan => {  
         if (plan.expiresAt && new Date(plan.expiresAt).getTime() > now) {  
@@ -342,86 +334,108 @@ app.post('/dial-number', twilioParser, async (req, res) => {
         }  
       });  
     }  
-  
-    // Add balance-based minutes  
-    const balanceMinutes = (caller.balance || 0) / RATE;  
-    availableMinutes += balanceMinutes;  
-  
+
+    availableMinutes += (caller.balance || 0) / RATE;  
+
     if (availableMinutes <= 0) {  
       twiml.say("You have no minutes remaining.");  
       twiml.hangup();  
       return res.type('text/xml').send(twiml.toString());  
     }  
-  
+
     const maxCallSeconds = Math.floor(availableMinutes * 60);  
-  
-    // ---------------- DIAL ----------------  
-    const dial = twiml.dial({  
-      action: `${BASE_URL}/call-ended`,  
-      method: 'POST',  
-      callerId: TWILIO_NUMBER,  // ✅ Correct callerId constant  
+
+    // ============ CONFERENCE BRIDGE INSTEAD OF DIRECT DIAL ============  
+    const room = `room-${caller._id}-${Date.now()}`;  
+
+    await setSession(`room:${room}`, { userId: caller._id }, maxCallSeconds + 60);  
+
+    const dial = twiml.dial();  
+    dial.conference({  
+      startConferenceOnEnter: false,  
+      endConferenceOnExit: true,  
+      waitUrl: 'http://twimlets.com/holdmusic?Bucket=com.twilio.music.classical'  
+    }, room);  
+
+    res.type('text/xml').send(twiml.toString());  
+
+    // -------- Create outbound call leg --------  
+    await client.calls.create({  
+      to: numberToCall,  
+      from: TWILIO_NUMBER,  
+      url: `${BASE_URL}/outbound-join?room=${room}`,  
+      statusCallback: `${BASE_URL}/call-ended`,  
+      statusCallbackEvent: ['completed'],  
       timeLimit: maxCallSeconds  
     });  
-  
-    dial.number(numberToCall);  
-  
-    res.type('text/xml').send(twiml.toString());  
-  
+
   } catch (err) {  
     console.error('Error /dial-number:', err);  
-  
-    // Safe fallback TwiML  
     twiml.say("System error. Please try again later.");  
     twiml.hangup();  
     res.type('text/xml').send(twiml.toString());  
   }  
 });  
-  
-  
+
+
+// ================= OUTBOUND JOIN =================  
+app.post('/outbound-join', twilioParser, (req, res) => {  
+  const room = req.query.room;  
+  const twiml = new VoiceResponse();  
+
+  const dial = twiml.dial();  
+  dial.conference({  
+    startConferenceOnEnter: true,  
+    endConferenceOnExit: true  
+  }, room);  
+
+  res.type('text/xml').send(twiml.toString());  
+});  
+
+
 // ================= CALL ENDED =================        
 app.post('/call-ended', twilioParser, async (req, res) => {        
   try {        
     const callerNumber = req.body.From;        
-    const duration = parseInt(req.body.DialCallDuration || 0);        
+    const duration = parseInt(req.body.CallDuration || 0);        
     const minutesUsed = duration / 60;        
-  
+
     const user = await findUser(callerNumber);        
-  
+
     if (user) {        
       let remaining = minutesUsed;        
       const now = Date.now();        
-  
+
       user.plans.sort((a, b) => new Date(a.expiresAt) - new Date(b.expiresAt));        
-  
+
       for (let plan of user.plans) {        
         if (remaining <= 0) break;        
-  
         if (new Date(plan.expiresAt).getTime() > now && plan.minutes > 0) {        
           const used = Math.min(plan.minutes, remaining);        
           plan.minutes -= used;        
           remaining -= used;        
         }        
       }        
-  
+
       if (remaining > 0) {        
         const cost = (remaining / 60) * RATE;        
         user.balance = Math.max(0, user.balance - cost);        
       }        
-  
+
       user.totalCalls = (user.totalCalls || 0) + minutesUsed;        
       await user.save();        
-  
+
       await debugEmail(user.email, "Call Summary", {        
         message: `Used ${minutesUsed.toFixed(2)} minutes.`        
       });        
     }        
-  
+
     res.sendStatus(200);        
   } catch (err) {        
     console.error('Error /call-ended:', err);        
     res.status(503).send('Service Unavailable');        
   }        
-});  
+});
 
 
 // =================== ADMIN ROUTES ===================  
