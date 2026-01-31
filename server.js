@@ -272,14 +272,24 @@ app.post('/verify-otp', twilioParser, async (req, res) => {
       
 // ================= DIAL =================
 app.post('/dial-number', twilioParser, async (req, res) => {
-  try {
-    const twiml = new VoiceResponse();
-    const callerNumber = req.body.From;
-    let numberToCall = req.body.Digits;
+  const twiml = new VoiceResponse();
+  const callerNumberRaw = req.body.From;
+  let numberToCallRaw = req.body.Digits;
 
-    // ✅ Get the call session
+  try {
+    console.log('--- /dial-number called ---');
+    console.log('Raw Twilio body:', req.body);
+
+    // Normalize caller number
+    const callerNumber = callerNumberRaw.replace(/\D/g, '');
+    console.log('Normalized caller number:', callerNumber);
+
+    // ✅ Get call session
     const call = await getSession(`call:${callerNumber}`);
+    console.log('Session data:', call);
+
     if (!call || !call.pin) {
+      console.warn('No valid session found for caller.');
       twiml.say("Session expired. Goodbye.");
       twiml.hangup();
       return res.type('text/xml').send(twiml.toString());
@@ -287,14 +297,18 @@ app.post('/dial-number', twilioParser, async (req, res) => {
 
     // ✅ Find caller in DB
     const caller = await findUser(callerNumber);
+    console.log('Caller from DB:', caller);
+
     if (!caller) {
+      console.warn('Caller not found in database.');
       twiml.say("Caller not recognized. Goodbye.");
       twiml.hangup();
       return res.type('text/xml').send(twiml.toString());
     }
 
     // ✅ Prompt user if number not provided
-    if (!numberToCall) {
+    if (!numberToCallRaw) {
+      console.log('No number provided, prompting user...');
       twiml.gather({
         numDigits: 15,
         action: `${BASE_URL}/dial-number`,
@@ -307,18 +321,22 @@ app.post('/dial-number', twilioParser, async (req, res) => {
       return res.type('text/xml').send(twiml.toString());
     }
 
-    // ================= NORMALIZE NUMBER =================
-    numberToCall = numberToCall.replace(/\D/g, ''); // keep only digits
+    console.log('Raw number to call:', numberToCallRaw);
 
-    // If user entered a local number starting with '0', remove it and prepend country code if provided
+    // ================= NORMALIZE NUMBER =================
+    let numberToCall = numberToCallRaw.replace(/\D/g, ''); // digits only
+    console.log('Stripped number:', numberToCall);
+
     if (numberToCall.startsWith('0') && numberToCall.length > 1) {
       numberToCall = numberToCall.substring(1);
+      console.log('Removed leading zero:', numberToCall);
     }
 
-    // Ensure E.164 format for Twilio
+    // Add + if missing
     if (!numberToCall.startsWith('+')) {
       numberToCall = '+' + numberToCall;
     }
+    console.log('Final normalized number to dial:', numberToCall);
 
     // ================= CALCULATE AVAILABLE CALL TIME =================
     let availableMinutes = 0;
@@ -327,33 +345,36 @@ app.post('/dial-number', twilioParser, async (req, res) => {
     caller.plans.forEach(plan => {
       if (new Date(plan.expiresAt).getTime() > now) availableMinutes += plan.minutes;
     });
-
     const balanceMinutes = caller.balance / RATE;
     availableMinutes += balanceMinutes;
 
+    console.log('Available minutes:', availableMinutes);
+
     if (availableMinutes <= 0) {
+      console.warn('No minutes remaining.');
       twiml.say("You have no minutes remaining.");
       twiml.hangup();
       return res.type('text/xml').send(twiml.toString());
     }
 
     const maxCallSeconds = Math.floor(availableMinutes * 60);
+    console.log('Max call seconds:', maxCallSeconds);
 
     // ================= DIAL =================
     const dial = twiml.dial({
       action: `${BASE_URL}/call-ended`,
       method: 'POST',
       callerId: TWILIO_PHONE_NUMBER,
-      timeLimit: maxCallSeconds // 🔥 AUTO CUT OFF
+      timeLimit: maxCallSeconds
     });
 
     dial.number(numberToCall);
+    console.log('Dial XML generated:', twiml.toString());
 
     res.type('text/xml').send(twiml.toString());
 
   } catch (err) {
     console.error('Error /dial-number:', err);
-    const twiml = new VoiceResponse();
     twiml.say("System error. Please try again later.");
     twiml.hangup();
     res.type('text/xml').send(twiml.toString());
