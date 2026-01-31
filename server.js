@@ -270,78 +270,100 @@ app.post('/verify-otp', twilioParser, async (req, res) => {
 });      
       
       
-// ================= DIAL =================      
-app.post('/dial-number', twilioParser, async (req, res) => {      
-  try {      
-    const twiml = new VoiceResponse();      
-    const callerNumber = req.body.From;      
-    const numberToCall = req.body.Digits;      
-      
-    const call = await getSession(`call:${callerNumber}`);      
-      
-    if (!call || !call.pin) {      
-      twiml.say("Session expired. Goodbye.");      
-      twiml.hangup();      
-      return res.type('text/xml').send(twiml.toString());      
-    }      
-      
-    const caller = await findUser(callerNumber);      
-      
-    if (!caller) {      
-      twiml.say("Caller not recognized. Goodbye.");      
-      twiml.hangup();      
-      return res.type('text/xml').send(twiml.toString());      
-    }      
-      
-    if (!numberToCall) {      
-      twiml.gather({      
-        numDigits: 15,      
-        action: `${BASE_URL}/dial-number`,      
-        method: 'POST',      
-        timeout: 6000000,      
-        input: 'dtmf',      
-        finishOnKey: '',      
-        actionOnEmptyResult: true      
-      }).say("Enter the number you want to call. You have sixty seconds.");      
-      return res.type('text/xml').send(twiml.toString());      
-    }      
-      
-    // 🔥 CALCULATE AVAILABLE CALL TIME      
-    let availableMinutes = 0;      
-    const now = Date.now();      
-      
-    caller.plans.forEach(plan => {      
-      if (new Date(plan.expiresAt).getTime() > now) {      
-        availableMinutes += plan.minutes;      
-      }      
-    });      
-      
-    const balanceMinutes = caller.balance / RATE;      
-    availableMinutes += balanceMinutes;      
-      
-    if (availableMinutes <= 0) {      
-      twiml.say("You have no minutes remaining.");      
-      twiml.hangup();      
-      return res.type('text/xml').send(twiml.toString());      
-    }      
-      
-    const maxCallSeconds = Math.floor(availableMinutes * 60);      
-      
-    const dial = twiml.dial({      
-      action: `${BASE_URL}/call-ended`,      
-      method: 'POST',      
-      callerId: TWILIO_PHONE_NUMBER,      
-      timeLimit: maxCallSeconds   // 🔥 AUTO CUT OFF      
-    });      
-      
-    dial.number(numberToCall);      
-      
-    res.type('text/xml').send(twiml.toString());      
-      
-  } catch (err) {      
-    console.error('Error /dial-number:', err);      
-    res.status(503).send('Service Unavailable');      
-  }      
+
+// ================= DIAL =================
+app.post('/dial-number', twilioParser, async (req, res) => {
+  try {
+    const twiml = new VoiceResponse();
+    const callerNumber = req.body.From;
+    let numberToCall = req.body.Digits;
+
+    const call = await getSession(`call:${callerNumber}`);
+
+    if (!call || !call.pin) {
+      twiml.say("Session expired. Goodbye.");
+      twiml.hangup();
+      return res.type('text/xml').send(twiml.toString());
+    }
+
+    const caller = await findUser(callerNumber);
+
+    if (!caller) {
+      twiml.say("Caller not recognized. Goodbye.");
+      twiml.hangup();
+      return res.type('text/xml').send(twiml.toString());
+    }
+
+    // Prompt user if no number provided
+    if (!numberToCall) {
+      twiml.gather({
+        numDigits: 15,
+        action: `${BASE_URL}/dial-number`,
+        method: 'POST',
+        timeout: 60,
+        input: 'dtmf',
+        finishOnKey: '',
+        actionOnEmptyResult: true
+      }).say("Enter the country code followed by the number you want to call. Do not include the leading zero. You have sixty seconds.");
+      return res.type('text/xml').send(twiml.toString());
+    }
+
+    // ================= NORMALIZE NUMBER =================
+    try {
+      // Remove any non-digit characters
+      let n = numberToCall.replace(/\D/g, '');
+
+      // Must include country code
+      if (n.startsWith('0')) {
+        throw new Error("Invalid number format. Enter country code + number without leading zero.");
+      }
+
+      numberToCall = '+' + n; // E.164 format for Twilio
+    } catch (numErr) {
+      twiml.say(numErr.message);
+      twiml.hangup();
+      return res.type('text/xml').send(twiml.toString());
+    }
+
+    // ================= CALCULATE AVAILABLE CALL TIME =================
+    let availableMinutes = 0;
+    const now = Date.now();
+
+    caller.plans.forEach(plan => {
+      if (new Date(plan.expiresAt).getTime() > now) {
+        availableMinutes += plan.minutes;
+      }
+    });
+
+    const balanceMinutes = caller.balance / RATE;
+    availableMinutes += balanceMinutes;
+
+    if (availableMinutes <= 0) {
+      twiml.say("You have no minutes remaining.");
+      twiml.hangup();
+      return res.type('text/xml').send(twiml.toString());
+    }
+
+    const maxCallSeconds = Math.floor(availableMinutes * 60);
+
+    const dial = twiml.dial({
+      action: `${BASE_URL}/call-ended`,
+      method: 'POST',
+      callerId: TWILIO_PHONE_NUMBER,
+      timeLimit: maxCallSeconds // 🔥 AUTO CUT OFF
+    });
+
+    dial.number(numberToCall);
+
+    res.type('text/xml').send(twiml.toString());
+
+  } catch (err) {
+    console.error('Error /dial-number:', err);
+    const twiml = new VoiceResponse();
+    twiml.say("System error. Please try again later.");
+    twiml.hangup();
+    res.type('text/xml').send(twiml.toString());
+  }
 });      
       
       
