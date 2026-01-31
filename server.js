@@ -228,361 +228,200 @@ app.post('/check-pin', twilioParser, async (req, res) => {
 
 
 
-// ================= VERIFY OTP =================      
-app.post('/verify-otp', twilioParser, async (req, res) => {      
-  try {      
-    const twiml = new VoiceResponse();      
-    const callerNumber = normalizePhone(req.body.From);      
-    const entered = req.body.Digits;      
-
-    const call = await getSession(`call:${callerNumber}`);      
-    const otp = await getSession(`otp:${callerNumber}`);      
-
-    if (!call || !otp || entered !== otp.code) {      
-      await deleteSession(`call:${callerNumber}`);      
-      await deleteSession(`otp:${callerNumber}`);      
-      twiml.say("OTP failed.");      
-      twiml.hangup();      
-      return res.type('text/xml').send(twiml.toString());      
-    }      
-
-    await deleteSession(`otp:${callerNumber}`);      
-
-    // 🔹 Extend session TTL for dial stage
-    await setSession(`call:${callerNumber}`, {      
-      stage: 'dial',      
-      pin: call.pin      
-    }, 300);      
-
-    twiml.gather({      
-      numDigits: 15,      
-      action: `${BASE_URL}/dial-number`,      
-      method: 'POST',      
-      input: 'dtmf',      
-      timeout: 600,      
-      finishOnKey: '',      
-      actionOnEmptyResult: true      
-    }).say("Enter number to call within sixty seconds.");      
-
-    res.type('text/xml').send(twiml.toString());      
-
-  } catch (err) {      
-    console.error('Error /verify-otp:', err);      
-    res.status(503).send('Service Unavailable');      
-  }      
-});      
-
-
-
-// ================= DIAL =================
-app.post('/dial-number', twilioParser, async (req, res) => {
-  const twiml = new VoiceResponse();
-  const callerNumberRaw = req.body.From;
-  let numberToCallRaw = req.body.Digits;
-
-  try {
-    // ---------------- NORMALIZE CALLER NUMBER ----------------
-    const callerNumber = normalizePhone(callerNumberRaw); // e.g., "+2347012345678"
-
-    // ---------------- GET CALL SESSION ----------------
-    const call = await getSession(`call:${callerNumber}`);
-    if (!call || call.stage !== 'dial' || !call.pin) {
-      twiml.say("Session expired. Goodbye.");
-      twiml.hangup();
-      return res.type('text/xml').send(twiml.toString());
-    }
-
-    // ---------------- FIND CALLER IN DB ----------------
-    const caller = await findUser(callerNumber);
-    if (!caller) {
-      twiml.say("Caller not recognized. Goodbye.");
-      twiml.hangup();
-      return res.type('text/xml').send(twiml.toString());
-    }
-
-    // ---------------- PROMPT USER IF NO NUMBER PROVIDED ----------------
-    if (!numberToCallRaw) {
-      twiml.gather({
-        numDigits: 15,       // max digits
-        action: `${BASE_URL}/dial-number`,
-        method: 'POST',
-        timeout: 60,          // 60 seconds gather timeout
-        input: 'dtmf',
-        finishOnKey: '',
-        actionOnEmptyResult: true
-      }).say(
-        "Enter the country code followed by the number you want to call. " +
-        "Do not include the leading zero. You have sixty seconds."
-      );
-      return res.type('text/xml').send(twiml.toString());
-    }
-
-    // ---------------- NORMALIZE NUMBER TO CALL ----------------
-    let numberToCall = numberToCallRaw.replace(/\D/g, ''); // digits only
-    if (numberToCall.startsWith('0') && numberToCall.length > 1) {
-      numberToCall = numberToCall.substring(1);
-    }
-    // Ensure E.164 format
-    if (!numberToCall.startsWith('+')) {
-      numberToCall = '+' + numberToCall;
-    }
-
-    // ---------------- CALCULATE AVAILABLE CALL TIME ----------------
-    let availableMinutes = 0;
-    const now = Date.now();
-
-    // Sum valid plan minutes
-    if (Array.isArray(caller.plans)) {
-      caller.plans.forEach(plan => {
-        if (plan.expiresAt && new Date(plan.expiresAt).getTime() > now) {
-          availableMinutes += plan.minutes || 0;
-        }
-      });
-    }
-
-    // Add balance-based minutes
-    const balanceMinutes = (caller.balance || 0) / RATE;
-    availableMinutes += balanceMinutes;
-
-    if (availableMinutes <= 0) {
-      twiml.say("You have no minutes remaining.");
-      twiml.hangup();
-      return res.type('text/xml').send(twiml.toString());
-    }
-
-    const maxCallSeconds = Math.floor(availableMinutes * 60);
-
-    // ---------------- DIAL ----------------
-    const dial = twiml.dial({
-      action: `${BASE_URL}/call-ended`,
-      method: 'POST',
-      callerId: TWILIO_NUMBER,  // ✅ Correct callerId constant
-      timeLimit: maxCallSeconds
-    });
-
-    dial.number(numberToCall);
-
-    res.type('text/xml').send(twiml.toString());
-
-  } catch (err) {
-    console.error('Error /dial-number:', err);
-
-    // Safe fallback TwiML
-    twiml.say("System error. Please try again later.");
-    twiml.hangup();
-    res.type('text/xml').send(twiml.toString());
-  }
-});
-      
-      
-// ================= CALL ENDED =================      
-app.post('/call-ended', twilioParser, async (req, res) => {      
-  try {      
-    const callerNumber = req.body.From;      
-    const duration = parseInt(req.body.DialCallDuration || 0);      
-    const minutesUsed = duration / 60;      
-      
-    const user = await findUser(callerNumber);      
-      
-    if (user) {      
-      let remaining = minutesUsed;      
-      const now = Date.now();      
-      
-      user.plans.sort((a, b) => new Date(a.expiresAt) - new Date(b.expiresAt));      
-      
-      for (let plan of user.plans) {      
-        if (remaining <= 0) break;      
-      
-        if (new Date(plan.expiresAt).getTime() > now && plan.minutes > 0) {      
-          const used = Math.min(plan.minutes, remaining);      
-          plan.minutes -= used;      
-          remaining -= used;      
-        }      
-      }      
-      
-      if (remaining > 0) {      
-        const cost = (remaining / 60) * RATE;      
-        user.balance = Math.max(0, user.balance - cost);      
-      }      
-      
-      user.totalCalls = (user.totalCalls || 0) + minutesUsed;      
-      await user.save();      
-      
-      await debugEmail(user.email, "Call Summary", {      
-        message: `Used ${minutesUsed.toFixed(2)} minutes.`      
-      });      
-    }      
-      
-    res.sendStatus(200);      
-  } catch (err) {      
-    console.error('Error /call-ended:', err);      
-    res.status(503).send('Service Unavailable');      
-  }      
-});      
-
-// ================= VERIFY OTP =================
-app.post('/verify-otp', twilioParser, async (req, res) => {
-  try {
-    const twiml = new VoiceResponse();
-    const callerNumber = req.body.From;
-    const entered = req.body.Digits;
-
-    const call = await getSession(`call:${callerNumber}`);
-    const otp = await getSession(`otp:${callerNumber}`);
-
-    if (!call || !otp || entered !== otp.code) {
-      await deleteSession(`call:${callerNumber}`);
-      await deleteSession(`otp:${callerNumber}`);
-      twiml.say("OTP failed.");
-      twiml.hangup();
-      return res.type('text/xml').send(twiml.toString());
-    }
-
-    await deleteSession(`otp:${callerNumber}`);
-
-    await setSession(`call:${callerNumber}`, {
-      stage: 'dial',
-      pin: call.pin
-    }, 600);
-
-    twiml.gather({
-      numDigits: 15,
-      action: `${BASE_URL}/dial-number`,
-      method: 'POST',
-      input: 'dtmf',
-      timeout: 6000000,
-      finishOnKey: '',
-      actionOnEmptyResult: true
-    }).say("Enter number to call within sixty seconds.");
-
-    res.type('text/xml').send(twiml.toString());
-
-  } catch (err) {
-    console.error('Error /verify-otp:', err);
-    res.status(503).send('Service Unavailable');
-  }
-});
-
-
-// ================= DIAL =================
-app.post('/dial-number', twilioParser, async (req, res) => {
-  try {
-    const twiml = new VoiceResponse();
-    const callerNumber = req.body.From;
-    const numberToCall = req.body.Digits;
-
-    const call = await getSession(`call:${callerNumber}`);
-
-    if (!call || !call.pin) {
-      twiml.say("Session expired. Goodbye.");
-      twiml.hangup();
-      return res.type('text/xml').send(twiml.toString());
-    }
-
-    const caller = await findUser(callerNumber);
-
-    if (!caller) {
-      twiml.say("Caller not recognized. Goodbye.");
-      twiml.hangup();
-      return res.type('text/xml').send(twiml.toString());
-    }
-
-    if (!numberToCall) {
-      twiml.gather({
-        numDigits: 15,
-        action: `${BASE_URL}/dial-number`,
-        method: 'POST',
-        timeout: 6000000,
-        input: 'dtmf',
-        finishOnKey: '',
-        actionOnEmptyResult: true
-      }).say("Enter the number you want to call. You have sixty seconds.");
-      return res.type('text/xml').send(twiml.toString());
-    }
-
-    // 🔥 CALCULATE AVAILABLE CALL TIME
-    let availableMinutes = 0;
-    const now = Date.now();
-
-    caller.plans.forEach(plan => {
-      if (new Date(plan.expiresAt).getTime() > now) {
-        availableMinutes += plan.minutes;
-      }
-    });
-
-    const balanceMinutes = caller.balance / RATE;
-    availableMinutes += balanceMinutes;
-
-    if (availableMinutes <= 0) {
-      twiml.say("You have no minutes remaining.");
-      twiml.hangup();
-      return res.type('text/xml').send(twiml.toString());
-    }
-
-    const maxCallSeconds = Math.floor(availableMinutes * 60);
-
-    const dial = twiml.dial({
-      action: `${BASE_URL}/call-ended`,
-      method: 'POST',
-      callerId: TWILIO_PHONE_NUMBER,
-      timeLimit: maxCallSeconds   // 🔥 AUTO CUT OFF
-    });
-
-    dial.number(numberToCall);
-
-    res.type('text/xml').send(twiml.toString());
-
-  } catch (err) {
-    console.error('Error /dial-number:', err);
-    res.status(503).send('Service Unavailable');
-  }
-});
-
-
-// ================= CALL ENDED =================
-app.post('/call-ended', twilioParser, async (req, res) => {
-  try {
-    const callerNumber = req.body.From;
-    const duration = parseInt(req.body.DialCallDuration || 0);
-    const minutesUsed = duration / 60;
-
-    const user = await findUser(callerNumber);
-
-    if (user) {
-      let remaining = minutesUsed;
-      const now = Date.now();
-
-      user.plans.sort((a, b) => new Date(a.expiresAt) - new Date(b.expiresAt));
-
-      for (let plan of user.plans) {
-        if (remaining <= 0) break;
-
-        if (new Date(plan.expiresAt).getTime() > now && plan.minutes > 0) {
-          const used = Math.min(plan.minutes, remaining);
-          plan.minutes -= used;
-          remaining -= used;
-        }
-      }
-
-      if (remaining > 0) {
-        const cost = (remaining / 60) * RATE;
-        user.balance = Math.max(0, user.balance - cost);
-      }
-
-      user.totalCalls = (user.totalCalls || 0) + minutesUsed;
-      await user.save();
-
-      await debugEmail(user.email, "Call Summary", {
-        message: `Used ${minutesUsed.toFixed(2)} minutes.`
-      });
-    }
-
-    res.sendStatus(200);
-  } catch (err) {
-    console.error('Error /call-ended:', err);
-    res.status(503).send('Service Unavailable');
-  }
-});
+ 
+    
+    
+    // ================= VERIFY OTP =================        
+app.post('/verify-otp', twilioParser, async (req, res) => {        
+  try {        
+    const twiml = new VoiceResponse();        
+    const callerNumber = normalizePhone(req.body.From);        
+    const entered = req.body.Digits;        
+  
+    const call = await getSession(`call:${callerNumber}`);        
+    const otp = await getSession(`otp:${callerNumber}`);        
+  
+    if (!call || !otp || entered !== otp.code) {        
+      await deleteSession(`call:${callerNumber}`);        
+      await deleteSession(`otp:${callerNumber}`);        
+      twiml.say("OTP failed.");        
+      twiml.hangup();        
+      return res.type('text/xml').send(twiml.toString());        
+    }        
+  
+    await deleteSession(`otp:${callerNumber}`);        
+  
+    // 🔹 Extend session TTL for dial stage  
+    await setSession(`call:${callerNumber}`, {        
+      stage: 'dial',        
+      pin: call.pin        
+    }, 300);        
+  
+    twiml.gather({        
+      numDigits: 15,        
+      action: `${BASE_URL}/dial-number`,        
+      method: 'POST',        
+      input: 'dtmf',        
+      timeout: 600,        
+      finishOnKey: '',        
+      actionOnEmptyResult: true        
+    }).say("Enter number to call within sixty seconds.");        
+  
+    res.type('text/xml').send(twiml.toString());        
+  
+  } catch (err) {        
+    console.error('Error /verify-otp:', err);        
+    res.status(503).send('Service Unavailable');        
+  }        
+});        
+  
+  
+  
+// ================= DIAL =================  
+app.post('/dial-number', twilioParser, async (req, res) => {  
+  const twiml = new VoiceResponse();  
+  const callerNumberRaw = req.body.From;  
+  let numberToCallRaw = req.body.Digits;  
+  
+  try {  
+    // ---------------- NORMALIZE CALLER NUMBER ----------------  
+    const callerNumber = normalizePhone(callerNumberRaw); // e.g., "+2347012345678"  
+  
+    // ---------------- GET CALL SESSION ----------------  
+    const call = await getSession(`call:${callerNumber}`);  
+    if (!call || call.stage !== 'dial' || !call.pin) {  
+      twiml.say("Session expired. Goodbye.");  
+      twiml.hangup();  
+      return res.type('text/xml').send(twiml.toString());  
+    }  
+  
+    // ---------------- FIND CALLER IN DB ----------------  
+    const caller = await findUser(callerNumber);  
+    if (!caller) {  
+      twiml.say("Caller not recognized. Goodbye.");  
+      twiml.hangup();  
+      return res.type('text/xml').send(twiml.toString());  
+    }  
+  
+    // ---------------- PROMPT USER IF NO NUMBER PROVIDED ----------------  
+    if (!numberToCallRaw) {  
+      twiml.gather({  
+        numDigits: 15,       // max digits  
+        action: `${BASE_URL}/dial-number`,  
+        method: 'POST',  
+        timeout: 60,          // 60 seconds gather timeout  
+        input: 'dtmf',  
+        finishOnKey: '',  
+        actionOnEmptyResult: true  
+      }).say(  
+        "Enter the country code followed by the number you want to call. " +  
+        "Do not include the leading zero. You have sixty seconds."  
+      );  
+      return res.type('text/xml').send(twiml.toString());  
+    }  
+  
+    // ---------------- NORMALIZE NUMBER TO CALL ----------------  
+    let numberToCall = numberToCallRaw.replace(/\D/g, ''); // digits only  
+    if (numberToCall.startsWith('0') && numberToCall.length > 1) {  
+      numberToCall = numberToCall.substring(1);  
+    }  
+    // Ensure E.164 format  
+    if (!numberToCall.startsWith('+')) {  
+      numberToCall = '+' + numberToCall;  
+    }  
+  
+    // ---------------- CALCULATE AVAILABLE CALL TIME ----------------  
+    let availableMinutes = 0;  
+    const now = Date.now();  
+  
+    // Sum valid plan minutes  
+    if (Array.isArray(caller.plans)) {  
+      caller.plans.forEach(plan => {  
+        if (plan.expiresAt && new Date(plan.expiresAt).getTime() > now) {  
+          availableMinutes += plan.minutes || 0;  
+        }  
+      });  
+    }  
+  
+    // Add balance-based minutes  
+    const balanceMinutes = (caller.balance || 0) / RATE;  
+    availableMinutes += balanceMinutes;  
+  
+    if (availableMinutes <= 0) {  
+      twiml.say("You have no minutes remaining.");  
+      twiml.hangup();  
+      return res.type('text/xml').send(twiml.toString());  
+    }  
+  
+    const maxCallSeconds = Math.floor(availableMinutes * 60);  
+  
+    // ---------------- DIAL ----------------  
+    const dial = twiml.dial({  
+      action: `${BASE_URL}/call-ended`,  
+      method: 'POST',  
+      callerId: TWILIO_NUMBER,  // ✅ Correct callerId constant  
+      timeLimit: maxCallSeconds  
+    });  
+  
+    dial.number(numberToCall);  
+  
+    res.type('text/xml').send(twiml.toString());  
+  
+  } catch (err) {  
+    console.error('Error /dial-number:', err);  
+  
+    // Safe fallback TwiML  
+    twiml.say("System error. Please try again later.");  
+    twiml.hangup();  
+    res.type('text/xml').send(twiml.toString());  
+  }  
+});  
+  
+  
+// ================= CALL ENDED =================        
+app.post('/call-ended', twilioParser, async (req, res) => {        
+  try {        
+    const callerNumber = req.body.From;        
+    const duration = parseInt(req.body.DialCallDuration || 0);        
+    const minutesUsed = duration / 60;        
+  
+    const user = await findUser(callerNumber);        
+  
+    if (user) {        
+      let remaining = minutesUsed;        
+      const now = Date.now();        
+  
+      user.plans.sort((a, b) => new Date(a.expiresAt) - new Date(b.expiresAt));        
+  
+      for (let plan of user.plans) {        
+        if (remaining <= 0) break;        
+  
+        if (new Date(plan.expiresAt).getTime() > now && plan.minutes > 0) {        
+          const used = Math.min(plan.minutes, remaining);        
+          plan.minutes -= used;        
+          remaining -= used;        
+        }        
+      }        
+  
+      if (remaining > 0) {        
+        const cost = (remaining / 60) * RATE;        
+        user.balance = Math.max(0, user.balance - cost);        
+      }        
+  
+      user.totalCalls = (user.totalCalls || 0) + minutesUsed;        
+      await user.save();        
+  
+      await debugEmail(user.email, "Call Summary", {        
+        message: `Used ${minutesUsed.toFixed(2)} minutes.`        
+      });        
+    }        
+  
+    res.sendStatus(200);        
+  } catch (err) {        
+    console.error('Error /call-ended:', err);        
+    res.status(503).send('Service Unavailable');        
+  }        
+});  
 
 
 // =================== ADMIN ROUTES ===================  
