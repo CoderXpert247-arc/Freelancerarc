@@ -256,7 +256,7 @@ app.post('/verify-otp', twilioParser, async (req, res) => {
       action: `${BASE_URL}/dial-number`,      
       method: 'POST',      
       input: 'dtmf',      
-      timeout: 6000000,      
+      timeout: 600,      
       finishOnKey: '',      
       actionOnEmptyResult: true      
     }).say("Enter number to call within sixty seconds.");      
