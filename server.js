@@ -1,4 +1,4 @@
-     require('dotenv').config();
+require('dotenv').config();
 const express = require('express');
 const twilio = require('twilio');
 const redis = require('redis');
@@ -270,7 +270,6 @@ app.post('/verify-otp', twilioParser, async (req, res) => {
 });      
       
       
-
 // ================= DIAL =================
 app.post('/dial-number', twilioParser, async (req, res) => {
   try {
@@ -278,23 +277,23 @@ app.post('/dial-number', twilioParser, async (req, res) => {
     const callerNumber = req.body.From;
     let numberToCall = req.body.Digits;
 
+    // ✅ Get the call session
     const call = await getSession(`call:${callerNumber}`);
-
     if (!call || !call.pin) {
       twiml.say("Session expired. Goodbye.");
       twiml.hangup();
       return res.type('text/xml').send(twiml.toString());
     }
 
+    // ✅ Find caller in DB
     const caller = await findUser(callerNumber);
-
     if (!caller) {
       twiml.say("Caller not recognized. Goodbye.");
       twiml.hangup();
       return res.type('text/xml').send(twiml.toString());
     }
 
-    // Prompt user if no number provided
+    // ✅ Prompt user if number not provided
     if (!numberToCall) {
       twiml.gather({
         numDigits: 15,
@@ -309,20 +308,16 @@ app.post('/dial-number', twilioParser, async (req, res) => {
     }
 
     // ================= NORMALIZE NUMBER =================
-    try {
-      // Remove any non-digit characters
-      let n = numberToCall.replace(/\D/g, '');
+    numberToCall = numberToCall.replace(/\D/g, ''); // keep only digits
 
-      // Must include country code
-      if (n.startsWith('0')) {
-        throw new Error("Invalid number format. Enter country code + number without leading zero.");
-      }
+    // If user entered a local number starting with '0', remove it and prepend country code if provided
+    if (numberToCall.startsWith('0') && numberToCall.length > 1) {
+      numberToCall = numberToCall.substring(1);
+    }
 
-      numberToCall = '+' + n; // E.164 format for Twilio
-    } catch (numErr) {
-      twiml.say(numErr.message);
-      twiml.hangup();
-      return res.type('text/xml').send(twiml.toString());
+    // Ensure E.164 format for Twilio
+    if (!numberToCall.startsWith('+')) {
+      numberToCall = '+' + numberToCall;
     }
 
     // ================= CALCULATE AVAILABLE CALL TIME =================
@@ -330,9 +325,7 @@ app.post('/dial-number', twilioParser, async (req, res) => {
     const now = Date.now();
 
     caller.plans.forEach(plan => {
-      if (new Date(plan.expiresAt).getTime() > now) {
-        availableMinutes += plan.minutes;
-      }
+      if (new Date(plan.expiresAt).getTime() > now) availableMinutes += plan.minutes;
     });
 
     const balanceMinutes = caller.balance / RATE;
@@ -346,6 +339,7 @@ app.post('/dial-number', twilioParser, async (req, res) => {
 
     const maxCallSeconds = Math.floor(availableMinutes * 60);
 
+    // ================= DIAL =================
     const dial = twiml.dial({
       action: `${BASE_URL}/call-ended`,
       method: 'POST',
@@ -364,7 +358,9 @@ app.post('/dial-number', twilioParser, async (req, res) => {
     twiml.hangup();
     res.type('text/xml').send(twiml.toString());
   }
-});      
+});
+ 
+
       
       
 // ================= CALL ENDED =================      
