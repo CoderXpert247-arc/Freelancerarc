@@ -273,6 +273,7 @@ app.post('/verify-otp', twilioParser, async (req, res) => {
 });      
 
 
+
 // ================= DIAL =================
 app.post('/dial-number', twilioParser, async (req, res) => {
   const twiml = new VoiceResponse();
@@ -280,17 +281,18 @@ app.post('/dial-number', twilioParser, async (req, res) => {
   let numberToCallRaw = req.body.Digits;
 
   try {
-    const callerNumber = normalizePhone(callerNumberRaw);
+    // ---------------- NORMALIZE CALLER NUMBER ----------------
+    const callerNumber = normalizePhone(callerNumberRaw); // e.g., "+2347012345678"
 
-    // ✅ Get call session
+    // ---------------- GET CALL SESSION ----------------
     const call = await getSession(`call:${callerNumber}`);
-    if (!call || !call.pin) {
+    if (!call || call.stage !== 'dial' || !call.pin) {
       twiml.say("Session expired. Goodbye.");
       twiml.hangup();
       return res.type('text/xml').send(twiml.toString());
     }
 
-    // ✅ Find caller in DB
+    // ---------------- FIND CALLER IN DB ----------------
     const caller = await findUser(callerNumber);
     if (!caller) {
       twiml.say("Caller not recognized. Goodbye.");
@@ -298,37 +300,48 @@ app.post('/dial-number', twilioParser, async (req, res) => {
       return res.type('text/xml').send(twiml.toString());
     }
 
-    // ✅ Prompt user if number not provided
+    // ---------------- PROMPT USER IF NO NUMBER PROVIDED ----------------
     if (!numberToCallRaw) {
       twiml.gather({
-        numDigits: 15,
+        numDigits: 15,       // max digits
         action: `${BASE_URL}/dial-number`,
         method: 'POST',
-        timeout: 60,
+        timeout: 60,          // 60 seconds gather timeout
         input: 'dtmf',
         finishOnKey: '',
         actionOnEmptyResult: true
-      }).say("Enter the country code followed by the number you want to call. Do not include the leading zero. You have sixty seconds.");
+      }).say(
+        "Enter the country code followed by the number you want to call. " +
+        "Do not include the leading zero. You have sixty seconds."
+      );
       return res.type('text/xml').send(twiml.toString());
     }
 
-    // ================= NORMALIZE NUMBER =================
+    // ---------------- NORMALIZE NUMBER TO CALL ----------------
     let numberToCall = numberToCallRaw.replace(/\D/g, ''); // digits only
     if (numberToCall.startsWith('0') && numberToCall.length > 1) {
       numberToCall = numberToCall.substring(1);
     }
-
+    // Ensure E.164 format
     if (!numberToCall.startsWith('+')) {
       numberToCall = '+' + numberToCall;
     }
 
-    // ================= CALCULATE AVAILABLE CALL TIME =================
+    // ---------------- CALCULATE AVAILABLE CALL TIME ----------------
     let availableMinutes = 0;
     const now = Date.now();
-    caller.plans.forEach(plan => {
-      if (new Date(plan.expiresAt).getTime() > now) availableMinutes += plan.minutes;
-    });
-    const balanceMinutes = caller.balance / RATE;
+
+    // Sum valid plan minutes
+    if (Array.isArray(caller.plans)) {
+      caller.plans.forEach(plan => {
+        if (plan.expiresAt && new Date(plan.expiresAt).getTime() > now) {
+          availableMinutes += plan.minutes || 0;
+        }
+      });
+    }
+
+    // Add balance-based minutes
+    const balanceMinutes = (caller.balance || 0) / RATE;
     availableMinutes += balanceMinutes;
 
     if (availableMinutes <= 0) {
@@ -339,26 +352,27 @@ app.post('/dial-number', twilioParser, async (req, res) => {
 
     const maxCallSeconds = Math.floor(availableMinutes * 60);
 
-    // ================= DIAL =================
+    // ---------------- DIAL ----------------
     const dial = twiml.dial({
       action: `${BASE_URL}/call-ended`,
       method: 'POST',
-      callerId: TWILIO_PHONE_NUMBER,
+      callerId: TWILIO_NUMBER,  // ✅ Correct callerId constant
       timeLimit: maxCallSeconds
     });
 
     dial.number(numberToCall);
+
     res.type('text/xml').send(twiml.toString());
 
   } catch (err) {
     console.error('Error /dial-number:', err);
+
+    // Safe fallback TwiML
     twiml.say("System error. Please try again later.");
     twiml.hangup();
     res.type('text/xml').send(twiml.toString());
   }
 });
- 
-
       
       
 // ================= CALL ENDED =================      
