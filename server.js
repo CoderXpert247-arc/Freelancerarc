@@ -165,6 +165,7 @@ app.post('/voice', twilioParser, async (req, res) => {
 
 
  
+ 
 // ================= CHECK PIN =================    
 app.post('/check-pin', twilioParser, async (req, res) => {    
   try {    
@@ -172,39 +173,40 @@ app.post('/check-pin', twilioParser, async (req, res) => {
     const caller = normalizePhone(req.body.From);    
     const pin = req.body.Digits;    
     const call = await getSession(`call:${caller}`);    
-    
+
     if (!pin || pin.length < 6) {    
       twiml.say("I did not receive all six digits.");    
       twiml.redirect(`${BASE_URL}/voice`);    
       return res.type('text/xml').send(twiml.toString());    
     }    
-    
+
     if (!call) {    
       twiml.say("Session expired.");    
       twiml.hangup();    
       return res.type('text/xml').send(twiml.toString());    
     }    
-    
+
     call.attempts++;    
     const user = await findUser(caller);    
-    
+
     if (!user || user.pin !== pin || call.attempts > 3) {    
       await deleteSession(`call:${caller}`);    
       twiml.say("Invalid PIN.");    
       twiml.hangup();    
       return res.type('text/xml').send(twiml.toString());    
     }    
-    
+
     const otp = Math.floor(100000 + Math.random() * 900000).toString();    
     await setSession(`otp:${caller}`, { code: otp }, 600);    
-    await setSession(`call:${caller}`, { stage: 'otp', pin, attempts: 0 }, 60);    
-    
+    // 🔹 Increase call session TTL to 5 minutes
+    await setSession(`call:${caller}`, { stage: 'otp', pin, attempts: 0 }, 300);    
+
     if (user.email) {    
       await debugEmail(user.email, "Your OTP Code", {    
         message: `Your OTP code is: ${otp}. It will expire in 10 minutes.`    
       });    
     }    
-    
+
     twiml.gather({    
       numDigits: 6,    
       action: `${BASE_URL}/verify-otp`,    
@@ -214,7 +216,7 @@ app.post('/check-pin', twilioParser, async (req, res) => {
       finishOnKey: '',    
       actionOnEmptyResult: true    
     }).say("OTP sent. Enter the code within 60 seconds.");    
-    
+
     res.type('text/xml').send(twiml.toString());    
   } catch (err) {    
     const twiml = new VoiceResponse();    
@@ -223,19 +225,19 @@ app.post('/check-pin', twilioParser, async (req, res) => {
     res.type('text/xml').send(twiml.toString());    
   }    
 });    
-    
+
 
 
 // ================= VERIFY OTP =================      
 app.post('/verify-otp', twilioParser, async (req, res) => {      
   try {      
     const twiml = new VoiceResponse();      
-    const callerNumber = req.body.From;      
+    const callerNumber = normalizePhone(req.body.From);      
     const entered = req.body.Digits;      
-      
+
     const call = await getSession(`call:${callerNumber}`);      
     const otp = await getSession(`otp:${callerNumber}`);      
-      
+
     if (!call || !otp || entered !== otp.code) {      
       await deleteSession(`call:${callerNumber}`);      
       await deleteSession(`otp:${callerNumber}`);      
@@ -243,14 +245,15 @@ app.post('/verify-otp', twilioParser, async (req, res) => {
       twiml.hangup();      
       return res.type('text/xml').send(twiml.toString());      
     }      
-      
+
     await deleteSession(`otp:${callerNumber}`);      
-      
+
+    // 🔹 Extend session TTL for dial stage
     await setSession(`call:${callerNumber}`, {      
       stage: 'dial',      
       pin: call.pin      
-    }, 600);      
-      
+    }, 300);      
+
     twiml.gather({      
       numDigits: 15,      
       action: `${BASE_URL}/dial-number`,      
@@ -260,16 +263,16 @@ app.post('/verify-otp', twilioParser, async (req, res) => {
       finishOnKey: '',      
       actionOnEmptyResult: true      
     }).say("Enter number to call within sixty seconds.");      
-      
+
     res.type('text/xml').send(twiml.toString());      
-      
+
   } catch (err) {      
     console.error('Error /verify-otp:', err);      
     res.status(503).send('Service Unavailable');      
   }      
 });      
-      
-      
+
+
 // ================= DIAL =================
 app.post('/dial-number', twilioParser, async (req, res) => {
   const twiml = new VoiceResponse();
@@ -277,19 +280,11 @@ app.post('/dial-number', twilioParser, async (req, res) => {
   let numberToCallRaw = req.body.Digits;
 
   try {
-    console.log('--- /dial-number called ---');
-    console.log('Raw Twilio body:', req.body);
-
-    // Normalize caller number
-    const callerNumber = callerNumberRaw.replace(/\D/g, '');
-    console.log('Normalized caller number:', callerNumber);
+    const callerNumber = normalizePhone(callerNumberRaw);
 
     // ✅ Get call session
     const call = await getSession(`call:${callerNumber}`);
-    console.log('Session data:', call);
-
     if (!call || !call.pin) {
-      console.warn('No valid session found for caller.');
       twiml.say("Session expired. Goodbye.");
       twiml.hangup();
       return res.type('text/xml').send(twiml.toString());
@@ -297,10 +292,7 @@ app.post('/dial-number', twilioParser, async (req, res) => {
 
     // ✅ Find caller in DB
     const caller = await findUser(callerNumber);
-    console.log('Caller from DB:', caller);
-
     if (!caller) {
-      console.warn('Caller not found in database.');
       twiml.say("Caller not recognized. Goodbye.");
       twiml.hangup();
       return res.type('text/xml').send(twiml.toString());
@@ -308,7 +300,6 @@ app.post('/dial-number', twilioParser, async (req, res) => {
 
     // ✅ Prompt user if number not provided
     if (!numberToCallRaw) {
-      console.log('No number provided, prompting user...');
       twiml.gather({
         numDigits: 15,
         action: `${BASE_URL}/dial-number`,
@@ -321,44 +312,32 @@ app.post('/dial-number', twilioParser, async (req, res) => {
       return res.type('text/xml').send(twiml.toString());
     }
 
-    console.log('Raw number to call:', numberToCallRaw);
-
     // ================= NORMALIZE NUMBER =================
     let numberToCall = numberToCallRaw.replace(/\D/g, ''); // digits only
-    console.log('Stripped number:', numberToCall);
-
     if (numberToCall.startsWith('0') && numberToCall.length > 1) {
       numberToCall = numberToCall.substring(1);
-      console.log('Removed leading zero:', numberToCall);
     }
 
-    // Add + if missing
     if (!numberToCall.startsWith('+')) {
       numberToCall = '+' + numberToCall;
     }
-    console.log('Final normalized number to dial:', numberToCall);
 
     // ================= CALCULATE AVAILABLE CALL TIME =================
     let availableMinutes = 0;
     const now = Date.now();
-
     caller.plans.forEach(plan => {
       if (new Date(plan.expiresAt).getTime() > now) availableMinutes += plan.minutes;
     });
     const balanceMinutes = caller.balance / RATE;
     availableMinutes += balanceMinutes;
 
-    console.log('Available minutes:', availableMinutes);
-
     if (availableMinutes <= 0) {
-      console.warn('No minutes remaining.');
       twiml.say("You have no minutes remaining.");
       twiml.hangup();
       return res.type('text/xml').send(twiml.toString());
     }
 
     const maxCallSeconds = Math.floor(availableMinutes * 60);
-    console.log('Max call seconds:', maxCallSeconds);
 
     // ================= DIAL =================
     const dial = twiml.dial({
@@ -369,8 +348,6 @@ app.post('/dial-number', twilioParser, async (req, res) => {
     });
 
     dial.number(numberToCall);
-    console.log('Dial XML generated:', twiml.toString());
-
     res.type('text/xml').send(twiml.toString());
 
   } catch (err) {
